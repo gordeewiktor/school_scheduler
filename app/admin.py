@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from app.infrastructure.database.models import Lesson, Room, StudentGroup, Subject, Teacher, TimeSlot
+from app.infrastructure.database.models import AcademicYear, Period, Room, StudentGroup, Subject, Teacher
+
+
+@admin.register(AcademicYear)
+class AcademicYearAdmin(admin.ModelAdmin):
+    list_display = ["name"]
 
 
 @admin.register(Teacher)
@@ -27,20 +32,8 @@ class StudentGroupAdmin(admin.ModelAdmin):
     search_fields = ["name"]
 
 
-@admin.register(TimeSlot)
-class TimeSlotAdmin(admin.ModelAdmin):
-    list_display = ["day", "start_time", "end_time"]
-    list_filter = ["day"]
-    search_fields = ["day"]
-
-
-@admin.register(Lesson)
-class LessonAdmin(admin.ModelAdmin):
-    list_display = ["subject", "teacher", "room", "student_group", "time_slot"]
-    list_filter = ["teacher", "room", "student_group", "time_slot__day"]
-    search_fields = [
-        "subject__name",
-        "teacher__name",
-        "room__name",
-        "student_group__name",
-    ]
+@admin.register(Period)
+class PeriodAdmin(admin.ModelAdmin):
+    list_display = ["academic_year", "order", "name", "start_time", "end_time", "kind"]
+    list_filter = ["academic_year", "kind"]
+    ordering = ["academic_year", "order"]

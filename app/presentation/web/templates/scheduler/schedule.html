@@ -8,62 +8,80 @@
     <a class="btn btn-primary" href="{% url 'lesson-create' %}">Add Lesson</a>
 </div>
 
-<form class="row g-2 mb-4" method="get">
+<form id="schedule-filter-form" class="row g-2 mb-4" method="get">
+    <div class="col-md-3">
+        <select class="form-select" name="academic_year">
+            {% for year in academic_years %}
+                <option value="{{ year.pk }}" {% if selected_academic_year == year.pk|stringformat:"s" %}selected{% endif %}>{{ year }}</option>
+            {% endfor %}
+        </select>
+    </div>
     <div class="col-md-3">
         <select class="form-select" name="teacher">
             <option value="">All teachers</option>
-            {% for teacher in teachers %}
-                <option value="{{ teacher.pk }}" {% if selected_teacher == teacher.pk|stringformat:"s" %}selected{% endif %}>{{ teacher }}</option>
-            {% endfor %}
+            {% for teacher in teachers %}<option value="{{ teacher.pk }}" {% if selected_teacher == teacher.pk|stringformat:"s" %}selected{% endif %}>{{ teacher }}</option>{% endfor %}
         </select>
     </div>
     <div class="col-md-3">
         <select class="form-select" name="room">
             <option value="">All rooms</option>
-            {% for room in rooms %}
-                <option value="{{ room.pk }}" {% if selected_room == room.pk|stringformat:"s" %}selected{% endif %}>{{ room }}</option>
-            {% endfor %}
+            {% for room in rooms %}<option value="{{ room.pk }}" {% if selected_room == room.pk|stringformat:"s" %}selected{% endif %}>{{ room }}</option>{% endfor %}
         </select>
     </div>
     <div class="col-md-3">
         <select class="form-select" name="student_group">
             <option value="">All groups</option>
-            {% for group in student_groups %}
-                <option value="{{ group.pk }}" {% if selected_student_group == group.pk|stringformat:"s" %}selected{% endif %}>{{ group }}</option>
-            {% endfor %}
+            {% for group in student_groups %}<option value="{{ group.pk }}" {% if selected_student_group == group.pk|stringformat:"s" %}selected{% endif %}>{{ group }}</option>{% endfor %}
         </select>
     </div>
-    <div class="col-md-3">
-        <button class="btn btn-secondary" type="submit">Filter</button>
+    <div class="col-md-3 d-flex align-items-center">
         <a class="btn btn-link" href="{% url 'schedule' %}">Clear</a>
     </div>
 </form>
-
-{% for day, lessons in schedule.items %}
-    <h2 class="h4 mt-4">{{ day }}</h2>
+{% if periods %}
+<div style="overflow-x: auto;">
     <table class="table table-bordered align-middle">
         <thead>
         <tr>
-            <th>Time</th>
-            <th>Subject</th>
-            <th>Teacher</th>
-            <th>Room</th>
-            <th>Student Group</th>
+            <th>Day</th>
+            {% for period in periods %}
+                <th {% if period.kind == "BREAK" %}style="background:#f2f2f2"{% endif %}>
+                    {{ period.name }}<br>
+                    <span class="small text-muted">{{ period.start_time|time:"H:i" }}-{{ period.end_time|time:"H:i" }}</span>
+                </th>
+            {% endfor %}
         </tr>
         </thead>
         <tbody>
-        {% for lesson in lessons %}
+        {% for row in rows %}
             <tr>
-                <td>{{ lesson.time_slot.start_time|time:"H:i" }}-{{ lesson.time_slot.end_time|time:"H:i" }}</td>
-                <td>{{ lesson.subject }}</td>
-                <td>{{ lesson.teacher }}</td>
-                <td>{{ lesson.room }}</td>
-                <td>{{ lesson.student_group }}</td>
+                <th>{{ row.day.value|title }}</th>
+                {% for cell in row.cells %}
+                    <td colspan="{{ cell.colspan }}" {% if cell.kind == "break" %}style="background:#f2f2f2; text-align:center"{% endif %}>
+                        {% if cell.kind == "lesson" %}
+                            <strong>{{ cell.lesson.subject_name }}</strong><br>
+                            <span class="small">{{ cell.lesson.teacher_name }} · {{ cell.lesson.student_group_name }} · {{ cell.lesson.room_name }}</span>
+                        {% elif cell.kind == "break" %}
+                            <span class="text-muted">{{ cell.period.name }}</span>
+                        {% endif %}
+                    </td>
+                {% endfor %}
             </tr>
         {% endfor %}
         </tbody>
     </table>
-{% empty %}
-    <p class="text-muted">No lessons scheduled yet.</p>
-{% endfor %}
+</div>
+{% else %}
+    <p class="text-muted">Create an academic year and its periods to display a timetable.</p>
+{% endif %}
+<script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const form = document.getElementById("schedule-filter-form");
+            form.querySelectorAll("select").forEach(select => {
+                select.addEventListener("change", () => {
+                    form.submit();
+                });
+            });
+        });
+    </script>
 {% endblock %}

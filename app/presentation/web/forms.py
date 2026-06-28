@@ -1,6 +1,14 @@
 from django import forms
 
-from app.infrastructure.database.models import Lesson, Room, StudentGroup, Subject, Teacher, TimeSlot
+from app.infrastructure.database.models import (
+    AcademicYear,
+    Lesson,
+    Period,
+    Room,
+    StudentGroup,
+    Subject,
+    Teacher,
+)
 
 
 class BaseStyledModelForm(forms.ModelForm):
@@ -35,18 +43,45 @@ class StudentGroupForm(BaseStyledModelForm):
         fields = ["name", "size"]
 
 
-class TimeSlotForm(BaseStyledModelForm):
+class AcademicYearForm(BaseStyledModelForm):
     class Meta:
-        model = TimeSlot
-        fields = ["day", "start_time", "end_time"]
+        model = AcademicYear
+        fields = ["name", "default_period_duration"]
+
+
+class PeriodForm(BaseStyledModelForm):
+    class Meta:
+        model = Period
+        fields = ["academic_year", "name", "order", "start_time", "end_time", "kind"]
         widgets = {
             "start_time": forms.TimeInput(attrs={"type": "time"}),
             "end_time": forms.TimeInput(attrs={"type": "time"}),
         }
 
+    def clean_order(self) -> int:
+        order = self.cleaned_data["order"]
+        if order < 1:
+            raise forms.ValidationError("Order must be at least 1.")
+        return order
+
 
 class LessonForm(BaseStyledModelForm):
     class Meta:
         model = Lesson
-        fields = ["teacher", "subject", "room", "student_group", "time_slot", "notes"]
+        fields = [
+            "teacher",
+            "subject",
+            "room",
+            "student_group",
+            "day",
+            "start_period",
+            "duration",
+            "notes",
+        ]
         widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
+
+    def clean_duration(self) -> int:
+        duration = self.cleaned_data["duration"]
+        if duration < 1:
+            raise forms.ValidationError("Duration must be at least 1.")
+        return duration

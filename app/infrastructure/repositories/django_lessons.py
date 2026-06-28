@@ -1,15 +1,35 @@
 from django.db.models import Q
 
-from app.domain.models import Lesson as DomainLesson
+from app.application.ports.repositories import ScheduledLesson
+from app.domain.models import Day, Lesson as DomainLesson, Period as DomainPeriod
 from app.domain.policies import ExistingLesson, LessonRequest
-from app.infrastructure.database.models import Lesson
+from app.infrastructure.database.models import Lesson, Period
 
 
 class DjangoLessonRepository:
+    def periods_for_placement(self, start_period_id: int, duration: int) -> list[DomainPeriod]:
+        try:
+            start = Period.objects.get(pk=start_period_id)
+        except Period.DoesNotExist:
+            return []
+        return [
+            period.to_domain()
+            for period in Period.objects.filter(
+                academic_year_id=start.academic_year_id,
+                order__gte=start.order,
+            ).order_by("order")[:duration]
+        ]
+
+    def list_periods(self, academic_year_id: int) -> list[DomainPeriod]:
+        return [
+            period.to_domain()
+            for period in Period.objects.filter(academic_year_id=academic_year_id).order_by("order")
+        ]
+
     def list_potential_conflicts(self, request: LessonRequest) -> list[ExistingLesson]:
         queryset = (
-            Lesson.objects.select_related("time_slot")
-            .filter(time_slot__day=request.time_slot.day)
+            Lesson.objects.select_related("start_period")
+            .filter(day=request.day.value, start_period__academic_year_id=request.academic_year_id)
             .filter(
                 Q(teacher_id=request.teacher_id)
                 | Q(room_id=request.room_id)
@@ -18,57 +38,113 @@ class DjangoLessonRepository:
         )
         if request.lesson_id is not None:
             queryset = queryset.exclude(pk=request.lesson_id)
-
+        ordered_period_ids = list(
+            Period.objects.filter(academic_year_id=request.academic_year_id)
+            .order_by("order")
+            .values_list("id", flat=True)
+        )
+        period_positions = {
+            period_id: index for index, period_id in enumerate(ordered_period_ids)
+        }
         return [
             ExistingLesson(
                 id=lesson.id,
                 teacher_id=lesson.teacher_id,
                 room_id=lesson.room_id,
                 student_group_id=lesson.student_group_id,
-                time_slot=lesson.time_slot.to_domain(),
+                day=Day(lesson.day),
+                academic_year_id=lesson.start_period.academic_year_id,
+                occupied_period_ids=frozenset(
+                    ordered_period_ids[
+                        period_positions[lesson.start_period_id] :
+                        period_positions[lesson.start_period_id] + lesson.duration
+                    ]
+                ),
             )
             for lesson in queryset
         ]
 
     def create_lesson(self, lesson: DomainLesson) -> DomainLesson:
-        instance = Lesson.objects.create(
-            teacher_id=lesson.teacher_id,
-            subject_id=lesson.subject_id,
-            room_id=lesson.room_id,
-            student_group_id=lesson.student_group_id,
-            time_slot_id=lesson.time_slot_id,
-        )
+        instance = Lesson.objects.create(**self._fields(lesson))
         return instance.to_domain()
 
     def update_lesson(self, lesson: DomainLesson) -> DomainLesson:
         if lesson.id is None:
             raise ValueError("Lesson id is required for updates.")
         instance = Lesson.objects.get(pk=lesson.id)
-        instance.teacher_id = lesson.teacher_id
-        instance.subject_id = lesson.subject_id
-        instance.room_id = lesson.room_id
-        instance.student_group_id = lesson.student_group_id
-        instance.time_slot_id = lesson.time_slot_id
+        for field, value in self._fields(lesson).items():
+            setattr(instance, field, value)
         instance.save()
         return instance.to_domain()
 
-    def list_lessons(self) -> list[Lesson]:
-        return list(self._base_queryset())
-
-    def list_lessons_for_teacher(self, teacher_id: int) -> list[Lesson]:
-        return list(self._base_queryset().filter(teacher_id=teacher_id))
-
-    def list_lessons_for_room(self, room_id: int) -> list[Lesson]:
-        return list(self._base_queryset().filter(room_id=room_id))
-
-    def list_lessons_for_student_group(self, student_group_id: int) -> list[Lesson]:
-        return list(self._base_queryset().filter(student_group_id=student_group_id))
-
-    def _base_queryset(self):
-        return Lesson.objects.select_related(
-            "teacher",
-            "subject",
-            "room",
-            "student_group",
-            "time_slot",
+    def list_lessons(self, academic_year_id: int) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(start_period__academic_year_id=academic_year_id)
         )
+
+    def list_lessons_for_teacher(
+        self, teacher_id: int, academic_year_id: int
+    ) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(
+                teacher_id=teacher_id, start_period__academic_year_id=academic_year_id
+            )
+        )
+
+    def list_lessons_for_room(
+        self, room_id: int, academic_year_id: int
+    ) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(
+                room_id=room_id, start_period__academic_year_id=academic_year_id
+            )
+        )
+
+    def list_lessons_for_student_group(
+        self, student_group_id: int, academic_year_id: int
+    ) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(
+                student_group_id=student_group_id,
+                start_period__academic_year_id=academic_year_id,
+            )
+        )
+
+    @staticmethod
+    def _fields(lesson: DomainLesson) -> dict[str, object]:
+        return {
+            "teacher_id": lesson.teacher_id,
+            "subject_id": lesson.subject_id,
+            "room_id": lesson.room_id,
+            "student_group_id": lesson.student_group_id,
+            "day": lesson.day.value,
+            "start_period_id": lesson.start_period_id,
+            "duration": lesson.duration,
+            "notes": lesson.notes,
+        }
+
+    @staticmethod
+    def _base_queryset():
+        return Lesson.objects.select_related(
+            "teacher", "subject", "room", "student_group", "start_period"
+        )
+
+    @staticmethod
+    def _project(queryset) -> list[ScheduledLesson]:
+        return [
+            ScheduledLesson(
+                id=lesson.id,
+                teacher_id=lesson.teacher_id,
+                teacher_name=lesson.teacher.name,
+                subject_name=lesson.subject.name,
+                room_id=lesson.room_id,
+                room_name=lesson.room.name,
+                student_group_id=lesson.student_group_id,
+                student_group_name=lesson.student_group.name,
+                day=Day(lesson.day),
+                start_period=lesson.start_period.to_domain(),
+                duration=lesson.duration,
+                notes=lesson.notes,
+            )
+            for lesson in queryset
+        ]

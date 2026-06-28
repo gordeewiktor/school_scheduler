@@ -1,56 +1,44 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import time
+from enum import StrEnum
 
-from app.domain.exceptions import InvalidTimeSlotError
-
-
-@dataclass(slots=True)
-class Teacher:
-    name: str
-    availability: list[object] = field(default_factory=list)
-
-    def add_availability(self, slot: object) -> None:
-        if slot in self.availability:
-            raise ValueError("Time slot already exists")
-        self.availability.append(slot)
+from app.domain.exceptions import InvalidLessonPlacementError, InvalidPeriodError
 
 
-@dataclass(frozen=True, slots=True)
-class Room:
-    name: str
-    capacity: int | None = None
+class Day(StrEnum):
+    MONDAY = "MONDAY"
+    TUESDAY = "TUESDAY"
+    WEDNESDAY = "WEDNESDAY"
+    THURSDAY = "THURSDAY"
+    FRIDAY = "FRIDAY"
+
+
+class PeriodKind(StrEnum):
+    LESSON = "LESSON"
+    BREAK = "BREAK"
 
 
 @dataclass(frozen=True, slots=True)
-class Subject:
+class Period:
+    id: int
+    academic_year_id: int
     name: str
-
-
-@dataclass(frozen=True, slots=True)
-class StudentGroup:
-    name: str
-    size: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TimeSlot:
-    day: str
-    start_time: time | int
-    end_time: time | int
+    order: int
+    start_time: time
+    end_time: time
+    kind: PeriodKind
 
     def __post_init__(self) -> None:
         if self.start_time >= self.end_time:
-            raise InvalidTimeSlotError("Start time must be before end time.")
+            raise InvalidPeriodError("Start time must be before end time.")
+        if self.order < 1:
+            raise InvalidPeriodError("Period order must be at least 1.")
 
-    def overlaps(self, other: "TimeSlot") -> bool:
-        if self.day != other.day:
-            return False
-        return self.start_time < other.end_time and self.end_time > other.start_time
-
-
-Timeslot = TimeSlot
+    @property
+    def accepts_lessons(self) -> bool:
+        return self.kind == PeriodKind.LESSON
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,5 +47,12 @@ class Lesson:
     subject_id: int
     room_id: int
     student_group_id: int
-    time_slot_id: int
+    day: Day
+    start_period_id: int
+    duration: int = 1
+    notes: str = ""
     id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.duration < 1:
+            raise InvalidLessonPlacementError("Duration must be at least 1.")

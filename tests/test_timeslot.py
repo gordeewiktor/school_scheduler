@@ -1,55 +1,14 @@
-import pytest
-from app.domain.models import Timeslot
+from datetime import time
 
-def test_timeslot_has_day():
-    slot = Timeslot('Monday', 6, 7)
-
-    assert slot.day == 'Monday'
-
-def test_timeslot_has_start_time():
-    slot = Timeslot('Monday', 6, 7)
-
-    assert slot.start_time == 6
-
-def test_timeslot_has_end_time():
-    slot = Timeslot('Monday', 6, 7)
-
-    assert slot.end_time == 7
-
-def test_timeslots_overlap_from_right():
-    slot1 = Timeslot('Tuesday', 2, 4)
-    slot2 = Timeslot('Tuesday', 3, 5)
-
-    assert slot1.overlaps(slot2)
-
-def test_timeslots_overlap_from_left():
-    slot1 = Timeslot('Tuesday', 2, 4)
-    slot2 = Timeslot('Tuesday', 1, 3)
-
-    assert slot1.overlaps(slot2)
+from app.domain.models import Period, PeriodKind
 
 
-def test_timeslot_can_be_inside_another():
-    slot1 = Timeslot('Tuesday', 1, 4)
-    slot2 = Timeslot('Tuesday', 2, 3)
+def test_period_contains_reusable_timing_and_kind():
+    period = Period(1, 2026, "Lunch", 4, time(12), time(13), PeriodKind.BREAK)
 
-    assert slot1.overlaps(slot2)
-
-
-def test_timeslots_do_not_overlap():
-    slot1 = Timeslot('Tuesday', 1, 2)
-    slot2 = Timeslot('Tuesday', 3, 4)
-
-    assert not slot1.overlaps(slot2)
-
-def test_timeslots_on_different_days_do_not_overlap():
-    slot1 = Timeslot('Monday', 2, 4)
-    slot2 = Timeslot('Tuesday', 2, 4)
-
-    assert not slot1.overlaps(slot2)
-
-def test_adjacent_timeslots_do_not_overlap():
-    slot1 = Timeslot('Tuesday', 2, 4)
-    slot2 = Timeslot('Tuesday', 4, 6)
-
-    assert not slot1.overlaps(slot2)
+    assert period.academic_year_id == 2026
+    assert period.name == "Lunch"
+    assert period.order == 4
+    assert period.start_time == time(12)
+    assert period.end_time == time(13)
+    assert period.kind == PeriodKind.BREAK
