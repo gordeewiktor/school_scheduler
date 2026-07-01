@@ -55,6 +55,36 @@
 {% elif page.missing_academic_year %}
     <p class="text-muted">Create an academic year and its periods to display a timetable.</p>
 {% elif page.show_timetable and periods %}
+{% if page.current_view == "whole_school" %}
+<div class="whole-school-scroll">
+    <div class="whole-school-grid" style="--period-count: {{ periods|length }}">
+        <div class="whole-school-header">
+            <div class="whole-school-day-heading">Day</div>
+            {% for period in whole_school_timetable.periods %}
+                <div class="whole-school-period-heading {% if period.kind == 'BREAK' %}is-break{% endif %}">
+                    <strong>{{ period.name }}</strong>
+                    <span>{{ period.start_time|time:"H:i" }}-{{ period.end_time|time:"H:i" }}</span>
+                </div>
+            {% endfor %}
+        </div>
+        {% for row in whole_school_timetable.rows %}
+            <div class="whole-school-row" style="--lane-count: {{ row.lane_count }}">
+                <div class="whole-school-day">{{ row.day.value|title }}</div>
+                {% for cell in row.period_cells %}
+                    <div class="whole-school-slot {% if cell.is_break %}is-break{% endif %}" style="grid-column: {{ cell.column }}">
+                        {% if cell.is_break %}<span>{{ cell.period.name }}</span>{% endif %}
+                    </div>
+                {% endfor %}
+                {% for card in row.cards %}
+                    <div class="whole-school-lesson" style="grid-column: {{ card.column }} / span {{ card.column_span }}; grid-row: {{ card.lane }}">
+                        <strong>{{ card.subject }}</strong><span aria-hidden="true"> · </span>{{ card.teacher }}<span aria-hidden="true"> · </span>{{ card.student_group }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% else %}
 <div style="overflow-x: auto;">
     <table class="table table-bordered align-middle">
         <thead>
@@ -87,6 +117,7 @@
         </tbody>
     </table>
 </div>
+{% endif %}
 {% elif page.show_timetable %}
     <p class="text-muted">Create an academic year and its periods to display a timetable.</p>
 {% endif %}
@@ -100,6 +131,20 @@
     .schedule-control { flex: 1 1 240px; max-width: 360px; }
     .schedule-back { margin-left: auto; }
     .schedule-prompt { margin: 4rem auto; text-align: center; }
+    .whole-school-scroll { overflow-x: auto; border: 1px solid #d7dce2; background: #fff; }
+    .whole-school-grid { min-width: max-content; --period-width: 145px; }
+    .whole-school-header, .whole-school-row { display: grid; grid-template-columns: 90px repeat(var(--period-count), minmax(var(--period-width), 1fr)); min-width: 100%; }
+    .whole-school-header { position: sticky; top: 0; z-index: 4; background: #fff; }
+    .whole-school-day-heading, .whole-school-period-heading { padding: 0.4rem 0.35rem; border-right: 1px solid #d7dce2; border-bottom: 1px solid #d7dce2; }
+    .whole-school-period-heading { text-align: center; font-size: 0.78rem; line-height: 1.15; }
+    .whole-school-period-heading span { display: block; margin-top: 0.15rem; color: #666; font-size: 0.7rem; font-weight: normal; }
+    .whole-school-row { grid-auto-rows: minmax(30px, auto); position: relative; border-bottom: 1px solid #d7dce2; }
+    .whole-school-row:last-child { border-bottom: 0; }
+    .whole-school-day { grid-column: 1; grid-row: 1 / span var(--lane-count); z-index: 2; padding: 0.45rem; border-right: 1px solid #d7dce2; background: #fafafa; font-size: 0.8rem; font-weight: 700; }
+    .whole-school-slot { grid-row: 1 / span var(--lane-count); min-height: 30px; border-right: 1px solid #e3e6e9; background: #fff; }
+    .whole-school-slot.is-break, .whole-school-period-heading.is-break { background: #f1f2f3; }
+    .whole-school-slot span { display: block; padding: 0.35rem 0.2rem; color: #777; font-size: 0.68rem; text-align: center; }
+    .whole-school-lesson { z-index: 3; align-self: stretch; min-width: 0; margin: 2px; padding: 0.25rem 0.35rem; border-left: 3px solid #0b5cad; border-radius: 3px; background: #eaf3fc; font-size: 0.75rem; line-height: 1.2; overflow-wrap: anywhere; }
 </style>
 <script>
         document.addEventListener("DOMContentLoaded", () => {

@@ -139,7 +139,9 @@ def test_lesson_form_returns_conflict_on_same_teacher(authenticated_client, less
 
 
 @pytest.mark.django_db
-def test_multi_period_lesson_renders_with_colspan(authenticated_client, lesson_form_data):
+def test_whole_school_multi_period_lesson_renders_with_grid_span(
+    authenticated_client, lesson_form_data
+):
     lesson_form_data["duration"] = 2
     authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
     year = lesson_form_data["start_period"].academic_year
@@ -147,7 +149,55 @@ def test_multi_period_lesson_renders_with_colspan(authenticated_client, lesson_f
         reverse("schedule"), {"view": "whole_school", "academic_year": year.pk}
     )
     assert response.status_code == 200
+    assert b"whole-school-lesson" in response.content
+    assert b"grid-column: 2 / span 2" in response.content
+
+
+@pytest.mark.django_db
+def test_whole_school_cards_use_compact_names_and_omit_room(
+    authenticated_client, lesson_form_data
+):
+    lesson_form_data["subject"].name = "Mathematics"
+    lesson_form_data["subject"].save()
+    lesson_form_data["teacher"].name = "Teacher Bobby"
+    lesson_form_data["teacher"].save()
+    lesson_form_data["student_group"].name = "EP1"
+    lesson_form_data["student_group"].save()
+    authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
+
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "whole_school",
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert b"<strong>Math</strong>" in response.content
+    assert b"Bobby" in response.content
+    assert b"EP1" in response.content
+    assert b"A101" not in response.content
+
+
+@pytest.mark.django_db
+def test_focused_timetable_keeps_existing_table_renderer(
+    authenticated_client, lesson_form_data
+):
+    lesson_form_data["duration"] = 2
+    authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
+
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "teacher",
+            "teacher": lesson_form_data["teacher"].pk,
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
     assert b'colspan="2"' in response.content
+    assert b"A101" in response.content
+    assert b'<div class="whole-school-grid"' not in response.content
 
 
 @pytest.mark.django_db

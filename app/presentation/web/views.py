@@ -33,6 +33,7 @@ from app.presentation.web.forms import (
     AcademicYearForm,
     PeriodForm,
 )
+from app.presentation.web.schedule_renderers import WholeSchoolTimetableRenderer
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):
@@ -523,13 +524,21 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
             show_timetable=show_timetable,
             missing_academic_year=bool(current_view and academic_year is None),
         )
-        rows = service.timetable_rows(grouped_schedule, periods) if show_timetable else []
+        focused_rows = []
+        whole_school_timetable = None
+        if show_timetable and current_view == "whole_school":
+            whole_school_timetable = WholeSchoolTimetableRenderer().render(
+                grouped_schedule, periods
+            )
+        elif show_timetable:
+            focused_rows = service.timetable_rows(grouped_schedule, periods)
 
         context.update(
             {
                 "page": page,
                 "schedule": grouped_schedule,
-                "rows": rows,
+                "rows": focused_rows,
+                "whole_school_timetable": whole_school_timetable,
                 "periods": periods,
                 "academic_years": academic_years,
                 "selected_academic_year": str(academic_year.pk) if academic_year else "",
