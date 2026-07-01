@@ -112,7 +112,9 @@ def test_schedule_uses_period_columns_and_breaks(authenticated_client):
         academic_year=year, name="Morning Break", order=1,
         start_time=time(10), end_time=time(10, 30), kind=Period.Kind.BREAK
     )
-    response = authenticated_client.get(reverse("schedule"), {"academic_year": year.pk})
+    response = authenticated_client.get(
+        reverse("schedule"), {"view": "whole_school", "academic_year": year.pk}
+    )
     assert response.status_code == 200
     assert b"Morning Break" in response.content
     assert len(response.context["periods"]) == 1
@@ -141,6 +143,39 @@ def test_multi_period_lesson_renders_with_colspan(authenticated_client, lesson_f
     lesson_form_data["duration"] = 2
     authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
     year = lesson_form_data["start_period"].academic_year
-    response = authenticated_client.get(reverse("schedule"), {"academic_year": year.pk})
+    response = authenticated_client.get(
+        reverse("schedule"), {"view": "whole_school", "academic_year": year.pk}
+    )
     assert response.status_code == 200
     assert b'colspan="2"' in response.content
+
+
+@pytest.mark.django_db
+def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client):
+    AcademicYear.objects.create(name="2026")
+
+    response = authenticated_client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert response.context["page"].waiting_for_view is True
+    assert response.context["page"].show_timetable is False
+    assert response.context["rows"] == []
+    assert b"Choose what you want to view" in response.content
+    assert b"<table" not in response.content
+
+
+@pytest.mark.django_db
+def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
+    AcademicYear.objects.create(name="2026")
+    Teacher.objects.create(name="Ada")
+    Room.objects.create(name="A101")
+    StudentGroup.objects.create(name="Grade 1")
+
+    response = authenticated_client.get(reverse("schedule"), {"view": "teacher"})
+
+    selector = response.context["page"].selector
+    assert selector.name == "teacher"
+    assert response.context["page"].waiting_for_selection is True
+    assert b'name="teacher"' in response.content
+    assert b'name="room"' not in response.content
+    assert b'name="student_group"' not in response.content

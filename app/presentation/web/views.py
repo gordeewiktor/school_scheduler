@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -394,8 +395,92 @@ class LessonDeleteView(SchedulerDeleteView):
     list_url_name = "lesson-list"
 
 
+@dataclass(frozen=True)
+class ScheduleViewChoice:
+    value: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class ScheduleSelector:
+    name: str
+    label: str
+    placeholder: str
+    options: Any
+    selected: str
+
+
+@dataclass(frozen=True)
+class SchedulePageState:
+    current_view: str
+    current_view_label: str
+    view_choices: tuple[ScheduleViewChoice, ...]
+    selector: ScheduleSelector | None
+    waiting_for_view: bool
+    waiting_for_selection: bool
+    show_timetable: bool
+    missing_academic_year: bool
+
+
 class ScheduleView(LoginRequiredMixin, TemplateView):
     template_name = "scheduler/schedule.html"
+
+    VIEW_CHOICES = (
+        ScheduleViewChoice("teacher", "Teacher", "View one teacher's week"),
+        ScheduleViewChoice(
+            "student_group", "Student Group", "View one student group's week"
+        ),
+        ScheduleViewChoice("room", "Room", "View one room's week"),
+        ScheduleViewChoice(
+            "whole_school", "Whole School", "View the complete master timetable"
+        ),
+    )
+    ENTITY_VIEWS = {
+        "teacher": {
+            "label": "Teacher",
+            "placeholder": "Choose a teacher",
+            "model": Teacher,
+            "service_method": "schedule_for_teacher",
+        },
+        "student_group": {
+            "label": "Student Group",
+            "placeholder": "Choose a student group",
+            "model": StudentGroup,
+            "service_method": "schedule_for_student_group",
+        },
+        "room": {
+            "label": "Room",
+            "placeholder": "Choose a room",
+            "model": Room,
+            "service_method": "schedule_for_room",
+        },
+    }
+
+    def _academic_year(self, academic_years: Any) -> AcademicYear | None:
+        academic_year_id = self.request.GET.get("academic_year", "")
+        if academic_year_id.isdigit():
+            academic_year = academic_years.filter(pk=int(academic_year_id)).first()
+            if academic_year is not None:
+                return academic_year
+        return academic_years.first()
+
+    def _selector(self, current_view: str) -> ScheduleSelector | None:
+        configuration = self.ENTITY_VIEWS.get(current_view)
+        if configuration is None:
+            return None
+
+        selected = self.request.GET.get(current_view, "")
+        model = configuration["model"]
+        if not selected.isdigit() or not model.objects.filter(pk=int(selected)).exists():
+            selected = ""
+        return ScheduleSelector(
+            name=current_view,
+            label=configuration["label"],
+            placeholder=configuration["placeholder"],
+            options=model.objects.all(),
+            selected=selected,
+        )
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
@@ -403,47 +488,50 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
         service = ScheduleService(repository, ConflictService(repository))
 
         academic_years = AcademicYear.objects.all()
-        academic_year_id = self.request.GET.get("academic_year")
-        academic_year = None
-        if academic_year_id and academic_year_id.isdigit():
-            academic_year = academic_years.filter(pk=int(academic_year_id)).first()
-        if academic_year is None:
-            academic_year = academic_years.first()
+        academic_year = self._academic_year(academic_years)
+        requested_view = self.request.GET.get("view", "")
+        valid_views = {choice.value for choice in self.VIEW_CHOICES}
+        current_view = requested_view if requested_view in valid_views else ""
+        selector = self._selector(current_view)
 
-        teacher_id = self.request.GET.get("teacher")
-        room_id = self.request.GET.get("room")
-        student_group_id = self.request.GET.get("student_group")
+        waiting_for_view = not current_view
+        waiting_for_selection = selector is not None and not selector.selected
+        show_timetable = bool(academic_year and current_view and not waiting_for_selection)
 
-        if academic_year is None:
-            grouped_schedule = {}
-            periods = []
-        elif teacher_id and teacher_id.isdigit():
-            grouped_schedule = service.schedule_for_teacher(int(teacher_id), academic_year.pk)
+        grouped_schedule = {}
+        periods = []
+        if show_timetable:
             periods = service.periods(academic_year.pk)
-        elif room_id and room_id.isdigit():
-            grouped_schedule = service.schedule_for_room(int(room_id), academic_year.pk)
-            periods = service.periods(academic_year.pk)
-        elif student_group_id and student_group_id.isdigit():
-            grouped_schedule = service.schedule_for_student_group(
-                int(student_group_id), academic_year.pk
-            )
-            periods = service.periods(academic_year.pk)
-        else:
-            grouped_schedule = service.schedule(academic_year.pk) if academic_year else {}
-            periods = service.periods(academic_year.pk) if academic_year else []
+            if current_view == "whole_school":
+                grouped_schedule = service.schedule(academic_year.pk)
+            else:
+                configuration = self.ENTITY_VIEWS[current_view]
+                schedule_method = getattr(service, configuration["service_method"])
+                grouped_schedule = schedule_method(int(selector.selected), academic_year.pk)
+
+        current_view_label = next(
+            (choice.label for choice in self.VIEW_CHOICES if choice.value == current_view),
+            "",
+        )
+        page = SchedulePageState(
+            current_view=current_view,
+            current_view_label=current_view_label,
+            view_choices=self.VIEW_CHOICES,
+            selector=selector,
+            waiting_for_view=waiting_for_view,
+            waiting_for_selection=waiting_for_selection,
+            show_timetable=show_timetable,
+            missing_academic_year=bool(current_view and academic_year is None),
+        )
+        rows = service.timetable_rows(grouped_schedule, periods) if show_timetable else []
 
         context.update(
             {
+                "page": page,
                 "schedule": grouped_schedule,
-                "rows": service.timetable_rows(grouped_schedule, periods),
+                "rows": rows,
                 "periods": periods,
                 "academic_years": academic_years,
-                "teachers": Teacher.objects.all(),
-                "rooms": Room.objects.all(),
-                "student_groups": StudentGroup.objects.all(),
-                "selected_teacher": teacher_id or "",
-                "selected_room": room_id or "",
-                "selected_student_group": student_group_id or "",
                 "selected_academic_year": str(academic_year.pk) if academic_year else "",
             }
         )

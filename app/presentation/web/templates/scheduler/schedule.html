@@ -8,37 +8,53 @@
     <a class="btn btn-primary" href="{% url 'lesson-create' %}">Add Lesson</a>
 </div>
 
-<form id="schedule-filter-form" class="row g-2 mb-4" method="get">
-    <div class="col-md-3">
-        <select class="form-select" name="academic_year">
-            {% for year in academic_years %}
-                <option value="{{ year.pk }}" {% if selected_academic_year == year.pk|stringformat:"s" %}selected{% endif %}>{{ year }}</option>
+{% if page.waiting_for_view %}
+    <section class="schedule-start">
+        <h2 class="h3">Choose what you want to view</h2>
+        <p class="text-muted">Start with the timetable that is relevant to you.</p>
+        <div class="schedule-view-grid">
+            {% for choice in page.view_choices %}
+                <a class="schedule-view-card" href="?view={{ choice.value }}">
+                    <strong>{{ choice.label }}</strong>
+                    <span>{{ choice.description }}</span>
+                </a>
             {% endfor %}
-        </select>
+        </div>
+    </section>
+{% else %}
+    <form id="schedule-filter-form" class="schedule-controls mb-4" method="get">
+        <input type="hidden" name="view" value="{{ page.current_view }}">
+        <div class="schedule-control">
+            <label class="form-label" for="academic-year-selector">Academic Year</label>
+            <select id="academic-year-selector" class="form-select" name="academic_year">
+                {% for year in academic_years %}
+                    <option value="{{ year.pk }}" {% if selected_academic_year == year.pk|stringformat:"s" %}selected{% endif %}>{{ year }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% if page.selector %}
+            <div class="schedule-control">
+                <label class="form-label" for="entity-selector">{{ page.selector.label }}</label>
+                <select id="entity-selector" class="form-select" name="{{ page.selector.name }}">
+                    <option value="">{{ page.selector.placeholder }}</option>
+                    {% for option in page.selector.options %}
+                        <option value="{{ option.pk }}" {% if page.selector.selected == option.pk|stringformat:"s" %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        {% endif %}
+        <a class="btn btn-link schedule-back" href="{% url 'schedule' %}">Choose another view</a>
+    </form>
+{% endif %}
+
+{% if page.waiting_for_selection %}
+    <div class="schedule-prompt">
+        <h2 class="h4">Choose a {{ page.selector.label|lower }}</h2>
+        <p class="text-muted">The timetable will load automatically.</p>
     </div>
-    <div class="col-md-3">
-        <select class="form-select" name="teacher">
-            <option value="">All teachers</option>
-            {% for teacher in teachers %}<option value="{{ teacher.pk }}" {% if selected_teacher == teacher.pk|stringformat:"s" %}selected{% endif %}>{{ teacher }}</option>{% endfor %}
-        </select>
-    </div>
-    <div class="col-md-3">
-        <select class="form-select" name="room">
-            <option value="">All rooms</option>
-            {% for room in rooms %}<option value="{{ room.pk }}" {% if selected_room == room.pk|stringformat:"s" %}selected{% endif %}>{{ room }}</option>{% endfor %}
-        </select>
-    </div>
-    <div class="col-md-3">
-        <select class="form-select" name="student_group">
-            <option value="">All groups</option>
-            {% for group in student_groups %}<option value="{{ group.pk }}" {% if selected_student_group == group.pk|stringformat:"s" %}selected{% endif %}>{{ group }}</option>{% endfor %}
-        </select>
-    </div>
-    <div class="col-md-3 d-flex align-items-center">
-        <a class="btn btn-link" href="{% url 'schedule' %}">Clear</a>
-    </div>
-</form>
-{% if periods %}
+{% elif page.missing_academic_year %}
+    <p class="text-muted">Create an academic year and its periods to display a timetable.</p>
+{% elif page.show_timetable and periods %}
 <div style="overflow-x: auto;">
     <table class="table table-bordered align-middle">
         <thead>
@@ -71,15 +87,26 @@
         </tbody>
     </table>
 </div>
-{% else %}
+{% elif page.show_timetable %}
     <p class="text-muted">Create an academic year and its periods to display a timetable.</p>
 {% endif %}
+<style>
+    .schedule-start { max-width: 760px; margin: 4rem auto; text-align: center; }
+    .schedule-view-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem; text-align: left; }
+    .schedule-view-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 1.25rem; border: 1px solid #d7dce2; border-radius: 8px; background: #fff; color: #222; }
+    .schedule-view-card:hover { border-color: #0b5cad; text-decoration: none; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08); }
+    .schedule-view-card span { color: #666; font-size: 0.9rem; }
+    .schedule-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
+    .schedule-control { flex: 1 1 240px; max-width: 360px; }
+    .schedule-back { margin-left: auto; }
+    .schedule-prompt { margin: 4rem auto; text-align: center; }
+</style>
 <script>
         document.addEventListener("DOMContentLoaded", () => {
             const form = document.getElementById("schedule-filter-form");
-            form.querySelectorAll("select").forEach(select => {
+            form?.querySelectorAll("select").forEach(select => {
                 select.addEventListener("change", () => {
-                    form.submit();
+                    form.requestSubmit();
                 });
             });
         });
