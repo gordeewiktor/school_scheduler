@@ -17,7 +17,18 @@ from app.infrastructure.database.models import (
 
 @pytest.fixture
 def authenticated_client(client):
-    user = get_user_model().objects.create_user(username="scheduler", password="test-password")
+    user = get_user_model().objects.create_superuser(
+        username="scheduler", email="scheduler@example.com", password="test-password"
+    )
+    client.force_login(user)
+    return client
+
+
+@pytest.fixture
+def regular_client(client):
+    user = get_user_model().objects.create_user(
+        username="viewer", password="test-password"
+    )
     client.force_login(user)
     return client
 
@@ -62,10 +73,11 @@ def test_login_page_renders(client):
 
 
 @pytest.mark.django_db
-def test_dashboard_requires_login(client):
-    response = client.get(reverse("dashboard"))
+def test_schedule_home_requires_login(client):
+    response = client.get(reverse("schedule"))
     assert response.status_code == 302
     assert reverse("login") in response["Location"]
+    assert reverse("schedule") == "/"
 
 
 @pytest.mark.django_db
@@ -229,3 +241,64 @@ def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
     assert b'name="teacher"' in response.content
     assert b'name="room"' not in response.content
     assert b'name="student_group"' not in response.content
+
+
+@pytest.mark.django_db
+def test_administrator_navigation(authenticated_client):
+    response = authenticated_client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b">Schedule<" in response.content
+    assert b">Lessons<" in response.content
+    assert b">Admin<" in response.content
+    assert b">Teacher Substitution<" not in response.content
+    assert b">Teachers<" not in response.content
+    assert b">Rooms<" not in response.content
+
+
+@pytest.mark.django_db
+def test_regular_user_navigation(regular_client):
+    response = regular_client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b">Schedule<" in response.content
+    assert b">Teacher Substitution<" in response.content
+    assert b">Lessons<" not in response.content
+    assert b">Admin<" not in response.content
+    assert b"Whole School" not in response.content
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_placeholder_is_available(regular_client):
+    response = regular_client.get(reverse("teacher-substitution"))
+
+    assert response.status_code == 200
+    assert b"Teacher substitution search will be implemented here." in response.content
+
+
+@pytest.mark.django_db
+def test_administrator_can_access_django_admin(authenticated_client):
+    assert authenticated_client.get(reverse("admin:index")).status_code == 200
+    assert authenticated_client.get(reverse("admin:app_teacher_changelist")).status_code == 200
+
+
+@pytest.mark.django_db
+def test_regular_user_cannot_access_administration_pages(regular_client):
+    assert regular_client.get(reverse("admin:index")).status_code == 302
+    assert regular_client.get(reverse("lesson-list")).status_code == 403
+    assert regular_client.get(reverse("teacher-list")).status_code == 403
+    assert regular_client.get(reverse("schedule"), {"view": "whole_school"}).status_code == 403
+
+
+@pytest.mark.django_db
+def test_regular_user_can_access_focused_schedule(regular_client):
+    year = AcademicYear.objects.create(name="2026")
+    teacher = Teacher.objects.create(name="Ada")
+
+    response = regular_client.get(
+        reverse("schedule"),
+        {"view": "teacher", "teacher": teacher.pk, "academic_year": year.pk},
+    )
+
+    assert response.status_code == 200
+    assert response.context["page"].current_view == "teacher"

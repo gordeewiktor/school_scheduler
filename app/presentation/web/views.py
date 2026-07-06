@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from django.core.exceptions import PermissionDenied
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
@@ -36,26 +37,14 @@ from app.presentation.web.forms import (
 from app.presentation.web.schedule_renderers import WholeSchoolTimetableRenderer
 
 
-class DashboardView(LoginRequiredMixin, TemplateView):
-    template_name = "scheduler/dashboard.html"
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        context = super().get_context_data(**kwargs)
-        context["counts"] = {
-            "teachers": Teacher.objects.count(),
-            "rooms": Room.objects.count(),
-            "subjects": Subject.objects.count(),
-            "student_groups": StudentGroup.objects.count(),
-            "academic_years": AcademicYear.objects.count(),
-            "periods": Period.objects.count(),
-            "lessons": Lesson.objects.count(),
-        }
-        return context
+class AdministratorRequiredMixin(LoginRequiredMixin):
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if request.user.is_authenticated and not request.user.is_staff:
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
 
 
 class ProtectedDeleteMixin:
-    protected_redirect_url: str = "dashboard"
-
     def form_valid(self, form):
         try:
             return super().form_valid(form)
@@ -67,10 +56,10 @@ class ProtectedDeleteMixin:
         try:
             return super().post(request, *args, **kwargs)
         except ProtectedError:
-            return redirect(self.protected_redirect_url)
+            return redirect(self.get_success_url())
 
 
-class SchedulerListView(LoginRequiredMixin, ListView):
+class SchedulerListView(AdministratorRequiredMixin, ListView):
     template_name = "scheduler/object_list.html"
     context_object_name = "objects"
 
@@ -94,7 +83,7 @@ class SchedulerListView(LoginRequiredMixin, ListView):
         return context
 
 
-class SchedulerCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
+class SchedulerCreateView(AdministratorRequiredMixin, SuccessMessageMixin, CreateView):
     template_name = "scheduler/object_form.html"
     success_message = "Created successfully."
     title = ""
@@ -109,7 +98,7 @@ class SchedulerCreateView(LoginRequiredMixin, SuccessMessageMixin, CreateView):
         return context
 
 
-class SchedulerUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
+class SchedulerUpdateView(AdministratorRequiredMixin, SuccessMessageMixin, UpdateView):
     template_name = "scheduler/object_form.html"
     success_message = "Updated successfully."
     title = ""
@@ -124,7 +113,7 @@ class SchedulerUpdateView(LoginRequiredMixin, SuccessMessageMixin, UpdateView):
         return context
 
 
-class SchedulerDeleteView(LoginRequiredMixin, ProtectedDeleteMixin, DeleteView):
+class SchedulerDeleteView(AdministratorRequiredMixin, ProtectedDeleteMixin, DeleteView):
     template_name = "scheduler/object_confirm_delete.html"
     title = ""
     list_url_name = ""
@@ -458,6 +447,22 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
         },
     }
 
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if (
+            request.user.is_authenticated
+            and request.GET.get("view") == "whole_school"
+            and not request.user.is_staff
+        ):
+            raise PermissionDenied
+        return super().dispatch(request, *args, **kwargs)
+
+    def _view_choices(self) -> tuple[ScheduleViewChoice, ...]:
+        if self.request.user.is_staff:
+            return self.VIEW_CHOICES
+        return tuple(
+            choice for choice in self.VIEW_CHOICES if choice.value != "whole_school"
+        )
+
     def _academic_year(self, academic_years: Any) -> AcademicYear | None:
         academic_year_id = self.request.GET.get("academic_year", "")
         if academic_year_id.isdigit():
@@ -491,7 +496,8 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
         academic_years = AcademicYear.objects.all()
         academic_year = self._academic_year(academic_years)
         requested_view = self.request.GET.get("view", "")
-        valid_views = {choice.value for choice in self.VIEW_CHOICES}
+        view_choices = self._view_choices()
+        valid_views = {choice.value for choice in view_choices}
         current_view = requested_view if requested_view in valid_views else ""
         selector = self._selector(current_view)
 
@@ -511,13 +517,13 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
                 grouped_schedule = schedule_method(int(selector.selected), academic_year.pk)
 
         current_view_label = next(
-            (choice.label for choice in self.VIEW_CHOICES if choice.value == current_view),
+            (choice.label for choice in view_choices if choice.value == current_view),
             "",
         )
         page = SchedulePageState(
             current_view=current_view,
             current_view_label=current_view_label,
-            view_choices=self.VIEW_CHOICES,
+            view_choices=view_choices,
             selector=selector,
             waiting_for_view=waiting_for_view,
             waiting_for_selection=waiting_for_selection,
@@ -545,3 +551,7 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
             }
         )
         return context
+
+
+class TeacherSubstitutionView(LoginRequiredMixin, TemplateView):
+    template_name = "scheduler/teacher_substitution.html"

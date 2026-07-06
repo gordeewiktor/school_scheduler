@@ -61,17 +61,11 @@
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container-fluid">
-        <a class="navbar-brand" href="{% url 'dashboard' %}">School Scheduler</a>
+        <a class="navbar-brand" href="{% url 'schedule' %}">School Scheduler</a>
         <div class="navbar-nav me-auto">
-            <a class="nav-link" href="{% url 'schedule' %}">Schedule</a>
-            <a class="nav-link" href="{% url 'teacher-list' %}">Teachers</a>
-            <a class="nav-link" href="{% url 'room-list' %}">Rooms</a>
-            <a class="nav-link" href="{% url 'subject-list' %}">Subjects</a>
-            <a class="nav-link" href="{% url 'student-group-list' %}">Groups</a>
-            <a class="nav-link" href="{% url 'academic-year-list' %}">Academic Years</a>
-            <a class="nav-link" href="{% url 'period-list' %}">Periods</a>
-            <a class="nav-link" href="{% url 'lesson-list' %}">Lessons</a>
-            <a class="nav-link" href="/admin/">Admin</a>
+            {% for item in navigation_items %}
+                <a class="nav-link" href="{% url item.url_name %}">{{ item.label }}</a>
+            {% endfor %}
         </div>
         {% if user.is_authenticated %}
             <form method="post" action="{% url 'logout' %}">
