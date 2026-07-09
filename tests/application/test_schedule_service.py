@@ -6,7 +6,7 @@ from app.application.ports.repositories import ScheduledLesson
 from app.application.services.conflicts import ConflictService
 from app.application.services.schedules import ScheduleService
 from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
-from app.domain.models import Day, Lesson, Period, PeriodKind
+from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import ExistingLesson
 
 
@@ -31,12 +31,16 @@ def scheduled(lesson_id, day=Day.MONDAY, order=1, duration=1, teacher_id=1, room
 
 
 class FakeLessonRepository:
-    def __init__(self, periods=None, conflicts=None, lessons=None):
+    def __init__(self, periods=None, conflicts=None, lessons=None, teachers=None):
         self.periods = periods or [make_period(1), make_period(2), make_period(3)]
         self.conflicts = conflicts or []
         self.lessons = lessons or []
+        self.teachers = teachers or []
         self.created = []
         self.updated = []
+
+    def list_teachers(self):
+        return self.teachers
 
     def periods_for_placement(self, start_period_id, duration):
         start_index = next(
@@ -67,6 +71,15 @@ class FakeLessonRepository:
 
     def list_lessons(self, academic_year_id):
         return self.lessons
+
+    def list_lessons_starting_at(self, academic_year_id, day, period_id):
+        return [
+            item
+            for item in self.lessons
+            if item.start_period.academic_year_id == academic_year_id
+            and item.day == day
+            and item.start_period.id == period_id
+        ]
 
     def list_lessons_for_teacher(self, teacher_id, academic_year_id):
         return [item for item in self.lessons if item.teacher_id == teacher_id]
@@ -177,3 +190,30 @@ def test_timetable_rows_include_breaks_and_multi_period_colspan():
     assert monday.cells[0].kind == "lesson"
     assert monday.cells[0].colspan == 2
     assert monday.cells[1].kind == "break"
+
+
+def test_available_teachers_excludes_teachers_with_lesson_starting_in_selected_period():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Grace"),
+        Teacher(id=3, name="Katherine"),
+    ]
+    lessons = [
+        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
+        scheduled(2, teacher_id=2, day=Day.MONDAY, order=2),
+        scheduled(3, teacher_id=3, day=Day.TUESDAY, order=1),
+    ]
+    service = build_service(FakeLessonRepository(lessons=lessons, teachers=teachers))
+
+    result = service.available_teachers(1, Day.MONDAY, 1)
+
+    assert [teacher.name for teacher in result] == ["Grace", "Katherine"]
+
+
+def test_available_teachers_returns_all_teachers_when_schedule_is_empty():
+    teachers = [Teacher(id=1, name="Ada"), Teacher(id=2, name="Grace")]
+    service = build_service(FakeLessonRepository(teachers=teachers))
+
+    result = service.available_teachers(1, Day.MONDAY, 1)
+
+    assert result == teachers

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from app.application.ports.repositories import LessonRepository, ScheduledLesson
 from app.application.services.conflicts import ConflictService
 from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
-from app.domain.models import Day, Lesson, Period, PeriodKind
+from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import LessonRequest
 
 
@@ -85,6 +85,20 @@ class ScheduleService:
 
     def periods(self, academic_year_id: int) -> list[Period]:
         return self.lesson_repository.list_periods(academic_year_id)
+
+    def available_teachers(
+        self, academic_year_id: int, day: Day, period_id: int
+    ) -> list[Teacher]:
+        teachers = self.lesson_repository.list_teachers()
+        lessons = self.lesson_repository.list_lessons_starting_at(
+            academic_year_id, day, period_id
+        )
+        occupied_teacher_ids = {lesson.teacher_id for lesson in lessons}
+        return [
+            teacher
+            for teacher in teachers
+            if teacher.id not in occupied_teacher_ids
+        ]
 
     def timetable_rows(
         self,

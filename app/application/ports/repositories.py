@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.domain.models import Day, Lesson, Period
+from app.domain.models import Day, Lesson, Period, Teacher
 from app.domain.policies import ExistingLesson, LessonRequest
 
 
@@ -24,6 +24,8 @@ class ScheduledLesson:
 
 
 class LessonRepository(Protocol):
+    def list_teachers(self) -> list[Teacher]: ...
+
     def periods_for_placement(self, start_period_id: int, duration: int) -> list[Period]: ...
 
     def list_periods(self, academic_year_id: int) -> list[Period]: ...
@@ -35,6 +37,10 @@ class LessonRepository(Protocol):
     def update_lesson(self, lesson: Lesson) -> Lesson: ...
 
     def list_lessons(self, academic_year_id: int) -> list[ScheduledLesson]: ...
+
+    def list_lessons_starting_at(
+        self, academic_year_id: int, day: Day, period_id: int
+    ) -> list[ScheduledLesson]: ...
 
     def list_lessons_for_teacher(
         self, teacher_id: int, academic_year_id: int

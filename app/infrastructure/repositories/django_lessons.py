@@ -1,12 +1,23 @@
 from django.db.models import Q
 
 from app.application.ports.repositories import ScheduledLesson
-from app.domain.models import Day, Lesson as DomainLesson, Period as DomainPeriod
+from app.domain.models import (
+    Day,
+    Lesson as DomainLesson,
+    Period as DomainPeriod,
+    Teacher as DomainTeacher,
+)
 from app.domain.policies import ExistingLesson, LessonRequest
-from app.infrastructure.database.models import Lesson, Period
+from app.infrastructure.database.models import Lesson, Period, Teacher
 
 
 class DjangoLessonRepository:
+    def list_teachers(self) -> list[DomainTeacher]:
+        return [
+            DomainTeacher(id=teacher.id, name=teacher.name, email=teacher.email)
+            for teacher in Teacher.objects.order_by("name")
+        ]
+
     def periods_for_placement(self, start_period_id: int, duration: int) -> list[DomainPeriod]:
         try:
             start = Period.objects.get(pk=start_period_id)
@@ -80,6 +91,17 @@ class DjangoLessonRepository:
     def list_lessons(self, academic_year_id: int) -> list[ScheduledLesson]:
         return self._project(
             self._base_queryset().filter(start_period__academic_year_id=academic_year_id)
+        )
+
+    def list_lessons_starting_at(
+        self, academic_year_id: int, day: Day, period_id: int
+    ) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(
+                day=day.value,
+                start_period_id=period_id,
+                start_period__academic_year_id=academic_year_id,
+            )
         )
 
     def list_lessons_for_teacher(

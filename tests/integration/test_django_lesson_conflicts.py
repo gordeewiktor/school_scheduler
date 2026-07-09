@@ -126,3 +126,34 @@ def test_update_rejects_conflict_with_another_lesson(school_data):
             )
         )
     assert first.id != second.id
+
+
+@pytest.mark.django_db
+def test_repository_lists_teachers_as_domain_models(school_data):
+    teachers = DjangoLessonRepository().list_teachers()
+
+    assert [teacher.name for teacher in teachers] == ["Ada Lovelace", "Grace Hopper"]
+    assert all(teacher.__class__.__module__ == "app.domain.models" for teacher in teachers)
+
+
+@pytest.mark.django_db
+def test_repository_lists_lessons_starting_at_selected_period_only(school_data):
+    repository = DjangoLessonRepository()
+    service().create_lesson(command(school_data))
+    service().create_lesson(
+        command(
+            school_data,
+            teacher_id=school_data["other_teacher"].pk,
+            room_id=school_data["other_room"].pk,
+            student_group_id=school_data["other_group"].pk,
+            start_period_id=school_data["periods"][1].pk,
+        )
+    )
+
+    lessons = repository.list_lessons_starting_at(
+        school_data["year"].pk,
+        Day.MONDAY,
+        school_data["periods"][0].pk,
+    )
+
+    assert [lesson.teacher_id for lesson in lessons] == [school_data["teacher"].pk]

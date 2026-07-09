@@ -4,5 +4,42 @@
 
 {% block content %}
 <h1 class="h2">Teacher Substitution</h1>
-<p class="text-muted">Teacher substitution search will be implemented here.</p>
+<p class="text-muted">Find teachers who are free at the start of a selected lesson period.</p>
+
+<form method="get" class="p-3 border rounded mb-4">
+    {% if form.non_field_errors %}
+        <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label" for="{{ form.academic_year.id_for_label }}">Academic Year</label>
+            {{ form.academic_year }}
+            {{ form.academic_year.errors }}
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="{{ form.day.id_for_label }}">Day</label>
+            {{ form.day }}
+            {{ form.day.errors }}
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="{{ form.period.id_for_label }}">Period</label>
+            {{ form.period }}
+            {{ form.period.errors }}
+        </div>
+    </div>
+    <button class="btn btn-primary mt-4" type="submit">Show available teachers</button>
+</form>
+
+{% if available_teachers is not None %}
+    <h2 class="h3">Available teachers</h2>
+    {% if available_teachers %}
+        <ul>
+            {% for teacher in available_teachers %}
+                <li>{{ teacher.name }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="text-muted">No teachers are available for this period.</p>
+    {% endif %}
+{% endif %}
 {% endblock %}

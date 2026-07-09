@@ -21,6 +21,13 @@ class PeriodKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class Teacher:
+    id: int
+    name: str
+    email: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Period:
     id: int
     academic_year_id: int

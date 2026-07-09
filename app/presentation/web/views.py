@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
+from app.presentation.web.dependencies import build_schedule_service
 
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -11,8 +12,6 @@ from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView
 
-from app.application.services.conflicts import ConflictService
-from app.application.services.schedules import ScheduleService
 from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
 from app.domain.models import Day, Lesson as DomainLesson
 from app.infrastructure.database.models import (
@@ -24,7 +23,6 @@ from app.infrastructure.database.models import (
     Subject,
     Teacher,
 )
-from app.infrastructure.repositories.django_lessons import DjangoLessonRepository
 from app.presentation.web.forms import (
     LessonForm,
     RoomForm,
@@ -33,6 +31,7 @@ from app.presentation.web.forms import (
     TeacherForm,
     AcademicYearForm,
     PeriodForm,
+    TeacherSubstitutionForm,
 )
 from app.presentation.web.schedule_renderers import WholeSchoolTimetableRenderer
 
@@ -334,8 +333,7 @@ class LessonWriteMixin:
 
     def form_valid(self, form):
         cleaned = form.cleaned_data
-        repository = DjangoLessonRepository()
-        service = ScheduleService(repository, ConflictService(repository))
+        service = build_schedule_service()
         try:
             lesson = DomainLesson(
                 id=self.object.pk if self.is_update else None,
@@ -490,8 +488,7 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        repository = DjangoLessonRepository()
-        service = ScheduleService(repository, ConflictService(repository))
+        service = build_schedule_service()
 
         academic_years = AcademicYear.objects.all()
         academic_year = self._academic_year(academic_years)
@@ -555,3 +552,24 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
 
 class TeacherSubstitutionView(LoginRequiredMixin, TemplateView):
     template_name = "scheduler/teacher_substitution.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        form = TeacherSubstitutionForm(self.request.GET or None)
+        available_teachers = None
+
+        if form.is_bound and form.is_valid():
+            service = build_schedule_service()
+            available_teachers = service.available_teachers(
+                academic_year_id=form.cleaned_data["academic_year"].pk,
+                day=Day(form.cleaned_data["day"]),
+                period_id=form.cleaned_data["period"].pk,
+            )
+
+        context.update(
+            {
+                "form": form,
+                "available_teachers": available_teachers,
+            }
+        )
+        return context

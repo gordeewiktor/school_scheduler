@@ -273,7 +273,10 @@ def test_teacher_substitution_placeholder_is_available(regular_client):
     response = regular_client.get(reverse("teacher-substitution"))
 
     assert response.status_code == 200
-    assert b"Teacher substitution search will be implemented here." in response.content
+    assert b"Show available teachers" in response.content
+    assert b'name="academic_year"' in response.content
+    assert b'name="day"' in response.content
+    assert b'name="period"' in response.content
 
 
 @pytest.mark.django_db
@@ -302,3 +305,36 @@ def test_regular_user_can_access_focused_schedule(regular_client):
 
     assert response.status_code == 200
     assert response.context["page"].current_view == "teacher"
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_form_submission_lists_available_teachers(
+    regular_client, lesson_form_data
+):
+    busy_teacher = lesson_form_data["teacher"]
+    free_teacher = Teacher.objects.create(name="Grace")
+    Lesson.objects.create(
+        teacher=busy_teacher,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+        duration=1,
+    )
+
+    response = regular_client.get(
+        reverse("teacher-substitution"),
+        {
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+            "day": "MONDAY",
+            "period": lesson_form_data["start_period"].pk,
+        },
+    )
+
+    assert response.status_code == 200
+    assert [teacher.name for teacher in response.context["available_teachers"]] == [
+        free_teacher.name
+    ]
+    assert free_teacher.name.encode() in response.content
+    assert busy_teacher.name.encode() not in response.content
