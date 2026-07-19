@@ -11,7 +11,7 @@ class ExistingLesson:
     student_group_id: int
     day: Day
     academic_year_id: int
-    occupied_period_ids: frozenset[int]
+    period_id: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +21,7 @@ class LessonRequest:
     student_group_id: int
     day: Day
     academic_year_id: int
-    occupied_period_ids: frozenset[int]
+    period_id: int
     lesson_id: int | None = None
 
 
@@ -44,7 +44,7 @@ class LessonConflictPolicy:
                 continue
             if request.day != lesson.day or request.academic_year_id != lesson.academic_year_id:
                 continue
-            if not request.occupied_period_ids & lesson.occupied_period_ids:
+            if request.period_id != lesson.period_id:
                 continue
             if lesson.teacher_id == request.teacher_id:
                 conflicts.append(

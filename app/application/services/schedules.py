@@ -13,7 +13,6 @@ class TimetableCell:
     period: Period
     kind: str
     lesson: ScheduledLesson | None = None
-    colspan: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,22 +45,18 @@ class ScheduleService:
         return self.lesson_repository.update_lesson(lesson)
 
     def _request_for(self, lesson: Lesson) -> LessonRequest:
-        periods = self.lesson_repository.periods_for_placement(
-            lesson.start_period_id, lesson.duration
-        )
-        if len(periods) != lesson.duration:
-            raise InvalidLessonPlacementError(
-                "The lesson extends beyond the configured periods."
-            )
-        if any(not period.accepts_lessons for period in periods):
+        period = self.lesson_repository.get_period(lesson.start_period_id)
+        if period is None:
+            raise InvalidLessonPlacementError("Choose a configured period.")
+        if not period.accepts_lessons:
             raise InvalidLessonPlacementError("Lessons cannot occupy break periods.")
         return LessonRequest(
             teacher_id=lesson.teacher_id,
             room_id=lesson.room_id,
             student_group_id=lesson.student_group_id,
             day=lesson.day,
-            academic_year_id=periods[0].academic_year_id,
-            occupied_period_ids=frozenset(period.id for period in periods),
+            academic_year_id=period.academic_year_id,
+            period_id=period.id,
             lesson_id=lesson.id,
         )
 
@@ -86,35 +81,17 @@ class ScheduleService:
     def periods(self, academic_year_id: int) -> list[Period]:
         return self.lesson_repository.list_periods(academic_year_id)
 
-    def available_teachers(
-        self, academic_year_id: int, day: Day, period_id: int
-    ) -> list[Teacher]:
-        teachers = self.lesson_repository.list_teachers()
-        lessons = self.lesson_repository.list_lessons_starting_at(
-            academic_year_id, day, period_id
-        )
-        occupied_teacher_ids = {lesson.teacher_id for lesson in lessons}
-        return [
-            teacher
-            for teacher in teachers
-            if teacher.id not in occupied_teacher_ids
-        ]
-
     def timetable_rows(
         self,
         schedule: dict[Day, list[ScheduledLesson]],
         periods: list[Period],
     ) -> list[TimetableRow]:
         rows: list[TimetableRow] = []
-        period_index = {period.id: index for index, period in enumerate(periods)}
         for day in self.DAY_ORDER:
             lanes: list[list[ScheduledLesson]] = []
             occupied_by_lane: list[set[int]] = []
             for lesson in schedule.get(day, []):
-                start_index = period_index[lesson.start_period.id]
-                occupied = {
-                    period.id for period in periods[start_index : start_index + lesson.duration]
-                }
+                occupied = {lesson.start_period.id}
                 for index, lane_occupied in enumerate(occupied_by_lane):
                     if not occupied & lane_occupied:
                         lanes[index].append(lesson)
@@ -143,10 +120,8 @@ class ScheduleService:
                         period=period,
                         kind="lesson",
                         lesson=lesson,
-                        colspan=lesson.duration,
                     )
                 )
-                index += lesson.duration
             else:
                 cells.append(
                     TimetableCell(
@@ -154,7 +129,7 @@ class ScheduleService:
                         kind="break" if period.kind == PeriodKind.BREAK else "empty",
                     )
                 )
-                index += 1
+            index += 1
         return cells
 
     def schedule(self, academic_year_id: int) -> dict[Day, list[ScheduledLesson]]:

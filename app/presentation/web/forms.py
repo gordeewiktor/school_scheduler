@@ -76,16 +76,9 @@ class LessonForm(BaseStyledModelForm):
             "student_group",
             "day",
             "start_period",
-            "duration",
             "notes",
         ]
         widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
-
-    def clean_duration(self) -> int:
-        duration = self.cleaned_data["duration"]
-        if duration < 1:
-            raise forms.ValidationError("Duration must be at least 1.")
-        return duration
 
 
 class TeacherSubstitutionForm(forms.Form):

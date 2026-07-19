@@ -19,14 +19,13 @@ class ScheduledLesson:
     student_group_name: str
     day: Day
     start_period: Period
-    duration: int
     notes: str = ""
 
 
 class LessonRepository(Protocol):
     def list_teachers(self) -> list[Teacher]: ...
 
-    def periods_for_placement(self, start_period_id: int, duration: int) -> list[Period]: ...
+    def get_period(self, period_id: int) -> Period | None: ...
 
     def list_periods(self, academic_year_id: int) -> list[Period]: ...
 
@@ -52,4 +51,10 @@ class LessonRepository(Protocol):
 
     def list_lessons_for_student_group(
         self, student_group_id: int, academic_year_id: int
+    ) -> list[ScheduledLesson]: ...
+   
+    def list_lessons_for_substitute(
+        self,
+        teacher_id: int,
+        academic_year_id: int,
     ) -> list[ScheduledLesson]: ...

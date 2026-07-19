@@ -11,7 +11,7 @@ class FakeLessonRepository:
         return self.lessons
 
 
-def lesson(lesson_id=1, teacher_id=1, room_id=1, student_group_id=1, orders=frozenset({1})):
+def lesson(lesson_id=1, teacher_id=1, room_id=1, student_group_id=1, period_id=1):
     return ExistingLesson(
         id=lesson_id,
         teacher_id=teacher_id,
@@ -19,18 +19,18 @@ def lesson(lesson_id=1, teacher_id=1, room_id=1, student_group_id=1, orders=froz
         student_group_id=student_group_id,
         day=Day.MONDAY,
         academic_year_id=1,
-        occupied_period_ids=orders,
+        period_id=period_id,
     )
 
 
-def request(teacher_id=2, room_id=2, student_group_id=2, orders=frozenset({1}), lesson_id=None):
+def request(teacher_id=2, room_id=2, student_group_id=2, period_id=1, lesson_id=None):
     return LessonRequest(
         teacher_id=teacher_id,
         room_id=room_id,
         student_group_id=student_group_id,
         day=Day.MONDAY,
         academic_year_id=1,
-        occupied_period_ids=orders,
+        period_id=period_id,
         lesson_id=lesson_id,
     )
 
@@ -43,20 +43,14 @@ def test_conflict_service_detects_teacher_room_and_group_conflicts():
     assert {conflict.field for conflict in conflicts} == {"teacher", "room", "student_group"}
 
 
-def test_multi_period_lesson_conflicts_on_any_occupied_period():
-    service = ConflictService(FakeLessonRepository([lesson(teacher_id=7, orders=frozenset({2, 3}))]))
-    conflicts = service.find_conflicts(request(teacher_id=7, orders=frozenset({3, 4})))
-    assert [conflict.field for conflict in conflicts] == ["teacher"]
-
-
-def test_conflict_service_ignores_non_overlapping_periods():
-    service = ConflictService(FakeLessonRepository([lesson(teacher_id=7, orders=frozenset({1, 2}))]))
-    assert service.find_conflicts(request(teacher_id=7, orders=frozenset({3}))) == []
+def test_conflict_service_ignores_consecutive_periods():
+    service = ConflictService(FakeLessonRepository([lesson(teacher_id=7, period_id=1)]))
+    assert service.find_conflicts(request(teacher_id=7, period_id=2)) == []
 
 
 def test_conflict_service_ignores_different_day_or_year():
-    different_day = ExistingLesson(1, 7, 1, 1, Day.TUESDAY, 1, frozenset({1}))
-    different_year = ExistingLesson(2, 7, 1, 1, Day.MONDAY, 2, frozenset({1}))
+    different_day = ExistingLesson(1, 7, 1, 1, Day.TUESDAY, 1, 1)
+    different_year = ExistingLesson(2, 7, 1, 1, Day.MONDAY, 2, 1)
     service = ConflictService(FakeLessonRepository([different_day, different_year]))
     assert service.find_conflicts(request(teacher_id=7)) == []
 

@@ -130,6 +130,14 @@ class Lesson(models.Model):
         FRIDAY = "FRIDAY", "Friday"
 
     teacher = models.ForeignKey(Teacher, on_delete=models.PROTECT, related_name="lessons")
+    planned_substitute = models.ForeignKey(
+        Teacher,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="planned_substitutions",
+        related_query_name="planned_substitution",
+    )
     subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="lessons")
     room = models.ForeignKey(Room, on_delete=models.PROTECT, related_name="lessons")
     student_group = models.ForeignKey(
@@ -139,7 +147,6 @@ class Lesson(models.Model):
     start_period = models.ForeignKey(
         Period, on_delete=models.PROTECT, related_name="starting_lessons"
     )
-    duration = models.PositiveSmallIntegerField(default=1)
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -153,11 +160,11 @@ class Lesson(models.Model):
         return DomainLesson(
             id=self.pk,
             teacher_id=self.teacher_id,
+            planned_substitute_id=self.planned_substitute_id,
             subject_id=self.subject_id,
             room_id=self.room_id,
             student_group_id=self.student_group_id,
             day=DomainDay(self.day),
             start_period_id=self.start_period_id,
-            duration=self.duration,
             notes=self.notes,
         )

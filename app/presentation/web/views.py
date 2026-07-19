@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
-from app.presentation.web.dependencies import build_schedule_service
+from app.presentation.web.dependencies import build_schedule_service, build_substitution_service
 
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -324,7 +324,6 @@ class LessonListView(SchedulerListView):
         ("student_group", "Student Group"),
         ("day", "Day"),
         ("start_period", "Start Period"),
-        ("duration", "Duration"),
     ]
 
 
@@ -343,7 +342,6 @@ class LessonWriteMixin:
                 student_group_id=cleaned["student_group"].pk,
                 day=Day(cleaned["day"]),
                 start_period_id=cleaned["start_period"].pk,
-                duration=cleaned["duration"],
                 notes=cleaned["notes"],
             )
             if self.is_update:
@@ -559,8 +557,8 @@ class TeacherSubstitutionView(LoginRequiredMixin, TemplateView):
         available_teachers = None
 
         if form.is_bound and form.is_valid():
-            service = build_schedule_service()
-            available_teachers = service.available_teachers(
+            substitution_service = build_substitution_service()
+            available_teachers = substitution_service.available_teachers(
                 academic_year_id=form.cleaned_data["academic_year"].pk,
                 day=Day(form.cleaned_data["day"]),
                 period_id=form.cleaned_data["period"].pk,

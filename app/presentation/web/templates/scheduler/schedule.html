@@ -78,7 +78,7 @@
                     </div>
                 {% endfor %}
                 {% for card in row.cards %}
-                    <div class="whole-school-lesson" style="grid-column: {{ card.column }} / span {{ card.column_span }}; grid-row: {{ card.lane }}">
+                    <div class="whole-school-lesson" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}">
                         <strong>{{ card.subject }}</strong><span aria-hidden="true"> · </span>{{ card.teacher }}<span aria-hidden="true"> · </span>{{ card.student_group }}
                     </div>
                 {% endfor %}
@@ -105,7 +105,7 @@
             <tr>
                 <th>{{ row.day.value|title }}</th>
                 {% for cell in row.cells %}
-                    <td colspan="{{ cell.colspan }}" {% if cell.kind == "break" %}style="background:#f2f2f2; text-align:center"{% endif %}>
+                    <td {% if cell.kind == "break" %}style="background:#f2f2f2; text-align:center"{% endif %}>
                         {% if cell.kind == "lesson" %}
                             <strong>{{ cell.lesson.subject_name }}</strong><br>
                             <span class="small">{{ cell.lesson.teacher_name }} · {{ cell.lesson.student_group_name }} · {{ cell.lesson.room_name }}</span>

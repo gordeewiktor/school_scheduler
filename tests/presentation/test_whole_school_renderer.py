@@ -20,7 +20,6 @@ def period(identifier: int, order: int, kind: PeriodKind = PeriodKind.LESSON) ->
 def lesson(
     identifier: int,
     start_period: Period,
-    duration: int = 1,
     subject: str = "Mathematics",
     teacher: str = "Teacher Bobby",
 ) -> ScheduledLesson:
@@ -35,13 +34,12 @@ def lesson(
         student_group_name=f"EP{identifier}",
         day=Day.MONDAY,
         start_period=start_period,
-        duration=duration,
     )
 
 
-def test_whole_school_renderer_stacks_concurrent_cards_and_preserves_span():
+def test_whole_school_renderer_stacks_concurrent_cards():
     periods = [period(1, 1), period(2, 2), period(3, 3)]
-    first = lesson(1, periods[0], duration=2)
+    first = lesson(1, periods[0])
     concurrent = lesson(2, periods[0])
 
     timetable = WholeSchoolTimetableRenderer().render(
@@ -51,9 +49,9 @@ def test_whole_school_renderer_stacks_concurrent_cards_and_preserves_span():
     monday = timetable.rows[0]
     assert len(timetable.rows) == 5
     assert monday.lane_count == 2
-    assert [(card.column, card.column_span, card.lane) for card in monday.cards] == [
-        (2, 2, 1),
-        (2, 1, 2),
+    assert [(card.column, card.lane) for card in monday.cards] == [
+        (2, 1),
+        (2, 2),
     ]
 
 

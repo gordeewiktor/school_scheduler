@@ -14,7 +14,7 @@ def make_period(order, kind=PeriodKind.LESSON):
     return Period(order, 1, f"Period {order}", order, time(8 + order), time(9 + order), kind)
 
 
-def scheduled(lesson_id, day=Day.MONDAY, order=1, duration=1, teacher_id=1, room_id=1, group_id=1):
+def scheduled(lesson_id, day=Day.MONDAY, order=1, teacher_id=1, room_id=1, group_id=1):
     return ScheduledLesson(
         id=lesson_id,
         teacher_id=teacher_id,
@@ -26,7 +26,6 @@ def scheduled(lesson_id, day=Day.MONDAY, order=1, duration=1, teacher_id=1, room
         student_group_name=f"Group {group_id}",
         day=day,
         start_period=make_period(order),
-        duration=duration,
     )
 
 
@@ -42,14 +41,8 @@ class FakeLessonRepository:
     def list_teachers(self):
         return self.teachers
 
-    def periods_for_placement(self, start_period_id, duration):
-        start_index = next(
-            (index for index, period in enumerate(self.periods) if period.id == start_period_id),
-            None,
-        )
-        if start_index is None:
-            return []
-        return self.periods[start_index : start_index + duration]
+    def get_period(self, period_id):
+        return next((period for period in self.periods if period.id == period_id), None)
 
     def list_periods(self, academic_year_id):
         return [period for period in self.periods if period.academic_year_id == academic_year_id]
@@ -59,8 +52,15 @@ class FakeLessonRepository:
 
     def create_lesson(self, lesson):
         saved = Lesson(
-            lesson.teacher_id, lesson.subject_id, lesson.room_id, lesson.student_group_id,
-            lesson.day, lesson.start_period_id, lesson.duration, lesson.notes, id=1
+            teacher_id=lesson.teacher_id,
+            subject_id=lesson.subject_id,
+            room_id=lesson.room_id,
+            student_group_id=lesson.student_group_id,
+            day=lesson.day,
+            start_period_id=lesson.start_period_id,
+            planned_substitute_id=lesson.planned_substitute_id,
+            notes=lesson.notes,
+            id=1,
         )
         self.created.append(saved)
         return saved
@@ -98,53 +98,42 @@ def build_service(repository):
 def command(**overrides):
     values = dict(
         teacher_id=1, subject_id=1, room_id=1, student_group_id=1,
-        day=Day.MONDAY, start_period_id=1, duration=1
+        day=Day.MONDAY, start_period_id=1
     )
     values.update(overrides)
     return Lesson(**values)
 
 
-def test_service_creates_multi_period_lesson_when_valid():
+def test_service_creates_lesson_when_valid():
     repository = FakeLessonRepository()
-    saved = build_service(repository).create_lesson(command(duration=2, notes="Double"))
+    saved = build_service(repository).create_lesson(command(notes="Lab"))
     assert saved.id == 1
-    assert saved.duration == 2
-    assert saved.notes == "Double"
+    assert saved.notes == "Lab"
 
 
-def test_service_rejects_break_in_occupied_periods():
-    repository = FakeLessonRepository([make_period(1), make_period(2, PeriodKind.BREAK)])
+def test_service_rejects_break_period():
+    repository = FakeLessonRepository([make_period(1, PeriodKind.BREAK)])
     with pytest.raises(InvalidLessonPlacementError, match="break"):
-        build_service(repository).create_lesson(command(duration=2))
+        build_service(repository).create_lesson(command())
     assert repository.created == []
 
 
-def test_service_rejects_lesson_past_last_period():
+def test_service_rejects_unknown_period():
     repository = FakeLessonRepository([make_period(1)])
-    with pytest.raises(InvalidLessonPlacementError, match="beyond"):
-        build_service(repository).create_lesson(command(duration=2))
-
-
-def test_duration_uses_period_sequence_not_numeric_order_values():
-    first = make_period(1)
-    second = make_period(2)
-    first = Period(first.id, 1, first.name, 10, first.start_time, first.end_time, first.kind)
-    second = Period(second.id, 1, second.name, 20, second.start_time, second.end_time, second.kind)
-    repository = FakeLessonRepository([first, second])
-    saved = build_service(repository).create_lesson(command(duration=2))
-    assert saved.duration == 2
+    with pytest.raises(InvalidLessonPlacementError, match="configured period"):
+        build_service(repository).create_lesson(command(start_period_id=2))
 
 
 def test_service_rejects_conflicting_lesson():
-    existing = ExistingLesson(1, 5, 2, 3, Day.MONDAY, 1, frozenset({1, 2}))
+    existing = ExistingLesson(1, 5, 2, 3, Day.MONDAY, 1, 1)
     repository = FakeLessonRepository(conflicts=[existing])
     with pytest.raises(ScheduleConflictError):
-        build_service(repository).create_lesson(command(teacher_id=5, duration=2))
+        build_service(repository).create_lesson(command(teacher_id=5))
     assert repository.created == []
 
 
 def test_service_updates_lesson_and_excludes_it_from_conflicts():
-    existing = ExistingLesson(7, 1, 1, 1, Day.MONDAY, 1, frozenset({1}))
+    existing = ExistingLesson(7, 1, 1, 1, Day.MONDAY, 1, 1)
     repository = FakeLessonRepository(conflicts=[existing])
     lesson = command(id=7)
     assert build_service(repository).update_lesson(lesson) == lesson
@@ -181,39 +170,12 @@ def test_schedule_projections_filter_same_lesson_data(method, identifier, expect
     assert [item.id for item in result[Day.MONDAY]] == [expected]
 
 
-def test_timetable_rows_include_breaks_and_multi_period_colspan():
+def test_timetable_rows_include_breaks_and_one_cell_per_period():
     periods = [make_period(1), make_period(2), make_period(3, PeriodKind.BREAK)]
-    lesson = scheduled(1, duration=2)
+    lesson = scheduled(1)
     service = build_service(FakeLessonRepository(periods=periods))
     rows = service.timetable_rows({Day.MONDAY: [lesson]}, periods)
     monday = rows[0]
     assert monday.cells[0].kind == "lesson"
-    assert monday.cells[0].colspan == 2
-    assert monday.cells[1].kind == "break"
-
-
-def test_available_teachers_excludes_teachers_with_lesson_starting_in_selected_period():
-    teachers = [
-        Teacher(id=1, name="Ada"),
-        Teacher(id=2, name="Grace"),
-        Teacher(id=3, name="Katherine"),
-    ]
-    lessons = [
-        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
-        scheduled(2, teacher_id=2, day=Day.MONDAY, order=2),
-        scheduled(3, teacher_id=3, day=Day.TUESDAY, order=1),
-    ]
-    service = build_service(FakeLessonRepository(lessons=lessons, teachers=teachers))
-
-    result = service.available_teachers(1, Day.MONDAY, 1)
-
-    assert [teacher.name for teacher in result] == ["Grace", "Katherine"]
-
-
-def test_available_teachers_returns_all_teachers_when_schedule_is_empty():
-    teachers = [Teacher(id=1, name="Ada"), Teacher(id=2, name="Grace")]
-    service = build_service(FakeLessonRepository(teachers=teachers))
-
-    result = service.available_teachers(1, Day.MONDAY, 1)
-
-    assert result == teachers
+    assert monday.cells[1].kind == "empty"
+    assert monday.cells[2].kind == "break"

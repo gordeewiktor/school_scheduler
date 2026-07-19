@@ -18,7 +18,6 @@ class WholeSchoolLessonCard:
     teacher: str
     student_group: str
     column: int
-    column_span: int
     lane: int
 
 
@@ -92,9 +91,7 @@ class WholeSchoolTimetableRenderer:
 
         for lesson in lessons:
             start_index = period_indexes[lesson.start_period.id]
-            occupied = {
-                period.id for period in periods[start_index : start_index + lesson.duration]
-            }
+            occupied = {lesson.start_period.id}
             lane = self._available_lane(occupied, occupied_by_lane)
             cards.append(
                 WholeSchoolLessonCard(
@@ -103,7 +100,6 @@ class WholeSchoolTimetableRenderer:
                     teacher=self.short_teacher(lesson.teacher_name),
                     student_group=lesson.student_group_name,
                     column=start_index + 2,
-                    column_span=lesson.duration,
                     lane=lane + 1,
                 )
             )

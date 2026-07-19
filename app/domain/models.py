@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import time
 from enum import StrEnum
 
-from app.domain.exceptions import InvalidLessonPlacementError, InvalidPeriodError
+from app.domain.exceptions import InvalidPeriodError
 
 
 class Day(StrEnum):
@@ -56,10 +56,6 @@ class Lesson:
     student_group_id: int
     day: Day
     start_period_id: int
-    duration: int = 1
+    planned_substitute_id: int | None = None
     notes: str = ""
     id: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.duration < 1:
-            raise InvalidLessonPlacementError("Duration must be at least 1.")

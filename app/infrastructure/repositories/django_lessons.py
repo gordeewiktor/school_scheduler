@@ -18,18 +18,11 @@ class DjangoLessonRepository:
             for teacher in Teacher.objects.order_by("name")
         ]
 
-    def periods_for_placement(self, start_period_id: int, duration: int) -> list[DomainPeriod]:
+    def get_period(self, period_id: int) -> DomainPeriod | None:
         try:
-            start = Period.objects.get(pk=start_period_id)
+            return Period.objects.get(pk=period_id).to_domain()
         except Period.DoesNotExist:
-            return []
-        return [
-            period.to_domain()
-            for period in Period.objects.filter(
-                academic_year_id=start.academic_year_id,
-                order__gte=start.order,
-            ).order_by("order")[:duration]
-        ]
+            return None
 
     def list_periods(self, academic_year_id: int) -> list[DomainPeriod]:
         return [
@@ -49,14 +42,6 @@ class DjangoLessonRepository:
         )
         if request.lesson_id is not None:
             queryset = queryset.exclude(pk=request.lesson_id)
-        ordered_period_ids = list(
-            Period.objects.filter(academic_year_id=request.academic_year_id)
-            .order_by("order")
-            .values_list("id", flat=True)
-        )
-        period_positions = {
-            period_id: index for index, period_id in enumerate(ordered_period_ids)
-        }
         return [
             ExistingLesson(
                 id=lesson.id,
@@ -65,12 +50,7 @@ class DjangoLessonRepository:
                 student_group_id=lesson.student_group_id,
                 day=Day(lesson.day),
                 academic_year_id=lesson.start_period.academic_year_id,
-                occupied_period_ids=frozenset(
-                    ordered_period_ids[
-                        period_positions[lesson.start_period_id] :
-                        period_positions[lesson.start_period_id] + lesson.duration
-                    ]
-                ),
+                period_id=lesson.start_period_id,
             )
             for lesson in queryset
         ]
@@ -131,6 +111,16 @@ class DjangoLessonRepository:
                 start_period__academic_year_id=academic_year_id,
             )
         )
+    
+    def list_lessons_for_substitute(
+        self, teacher_id: int, academic_year_id: int
+    ) -> list[ScheduledLesson]:
+        return self._project(
+            self._base_queryset().filter(
+                planned_substitute_id=teacher_id,
+                start_period__academic_year_id=academic_year_id,
+            )
+        )
 
     @staticmethod
     def _fields(lesson: DomainLesson) -> dict[str, object]:
@@ -141,7 +131,7 @@ class DjangoLessonRepository:
             "student_group_id": lesson.student_group_id,
             "day": lesson.day.value,
             "start_period_id": lesson.start_period_id,
-            "duration": lesson.duration,
+            "planned_substitute_id": lesson.planned_substitute_id,
             "notes": lesson.notes,
         }
 
@@ -165,7 +155,6 @@ class DjangoLessonRepository:
                 student_group_name=lesson.student_group.name,
                 day=Day(lesson.day),
                 start_period=lesson.start_period.to_domain(),
-                duration=lesson.duration,
                 notes=lesson.notes,
             )
             for lesson in queryset
