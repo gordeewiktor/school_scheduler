@@ -14,7 +14,14 @@
     </div>
     <div class="schedule-actions">
         {% if user.is_staff %}
-            {# TODO: Add Generate Planned Substitutions here once generation is implemented. #}
+            {% if selected_academic_year %}
+                <form method="post" action="{% url 'generate-planned-substitutions' %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="academic_year" value="{{ selected_academic_year }}">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button class="btn btn-secondary" type="submit">Generate Planned Substitutions</button>
+                </form>
+            {% endif %}
             <a class="btn btn-primary" href="{% url 'lesson-create' %}">Add Lesson</a>
         {% endif %}
     </div>

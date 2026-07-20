@@ -9,8 +9,9 @@ from django.contrib.messages.views import SuccessMessageMixin
 from django.db.models import ProtectedError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
-from django.urls import reverse_lazy
-from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView
+from django.urls import reverse, reverse_lazy
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView, View
 
 from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
 from app.domain.models import Day, Lesson as DomainLesson
@@ -559,6 +560,27 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
             }
         )
         return context
+
+
+class GeneratePlannedSubstitutionsView(AdministratorRequiredMixin, View):
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        academic_year_id = request.POST.get("academic_year", "")
+        if academic_year_id.isdigit():
+            build_substitution_service().generate_planned_substitutions(
+                int(academic_year_id)
+            )
+            messages.success(request, "Planned substitutions generated.")
+        else:
+            messages.error(request, "Choose an academic year before generating substitutions.")
+
+        next_url = request.POST.get("next", "")
+        if not url_has_allowed_host_and_scheme(
+            next_url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            next_url = reverse("schedule")
+        return redirect(next_url)
 
 
 class TeacherSubstitutionView(LoginRequiredMixin, TemplateView):

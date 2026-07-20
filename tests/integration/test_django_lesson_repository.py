@@ -170,3 +170,19 @@ def test_repository_projects_planned_substitute_name(school_data):
     assert [(lesson.id, lesson.planned_substitute_name) for lesson in lessons] == [
         (saved.id, "Grace Hopper")
     ]
+
+
+@pytest.mark.django_db
+def test_repository_sets_planned_substitute(school_data):
+    repository = DjangoLessonRepository()
+    saved = service().create_lesson(command(school_data))
+
+    repository.set_planned_substitute(
+        saved.id,
+        school_data["other_teacher"].pk,
+    )
+
+    lessons = repository.list_lessons(school_data["year"].pk)
+    assert [(lesson.id, lesson.planned_substitute_id) for lesson in lessons] == [
+        (saved.id, school_data["other_teacher"].pk)
+    ]

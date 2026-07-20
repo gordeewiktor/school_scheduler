@@ -68,6 +68,13 @@ class DjangoLessonRepository:
         instance.save()
         return instance.to_domain()
 
+    def set_planned_substitute(
+        self,
+        lesson_id: int,
+        teacher_id: int | None,
+    ) -> None:
+        Lesson.objects.filter(pk=lesson_id).update(planned_substitute_id=teacher_id)
+
     def list_lessons(self, academic_year_id: int) -> list[ScheduledLesson]:
         return self._project(
             self._base_queryset().filter(start_period__academic_year_id=academic_year_id)

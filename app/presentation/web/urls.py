@@ -5,6 +5,11 @@ from app.presentation.web import views
 urlpatterns = [
     path("", views.ScheduleView.as_view(), name="schedule"),
     path(
+        "generate-planned-substitutions/",
+        views.GeneratePlannedSubstitutionsView.as_view(),
+        name="generate-planned-substitutions",
+    ),
+    path(
         "teacher-substitution/",
         views.TeacherSubstitutionView.as_view(),
         name="teacher-substitution",

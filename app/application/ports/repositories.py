@@ -37,6 +37,12 @@ class LessonRepository(Protocol):
 
     def update_lesson(self, lesson: Lesson) -> Lesson: ...
 
+    def set_planned_substitute(
+        self,
+        lesson_id: int,
+        teacher_id: int | None,
+    ) -> None: ...
+
     def list_lessons(self, academic_year_id: int) -> list[ScheduledLesson]: ...
 
     def list_lessons_starting_at(

@@ -296,6 +296,57 @@ def test_whole_school_cards_link_to_edit_and_display_planned_substitute(
 
 
 @pytest.mark.django_db
+def test_schedule_shows_generate_planned_substitutions_button(
+    authenticated_client, lesson_form_data
+):
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "whole_school",
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert b"Generate Planned Substitutions" in response.content
+    assert reverse("generate-planned-substitutions").encode() in response.content
+
+
+@pytest.mark.django_db
+def test_generate_planned_substitutions_updates_timetable(
+    authenticated_client, lesson_form_data
+):
+    substitute = Teacher.objects.create(name="Grace")
+    Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    next_url = (
+        reverse("schedule")
+        + f"?view=teacher&teacher={lesson_form_data['teacher'].pk}"
+        + f"&academic_year={lesson_form_data['start_period'].academic_year_id}"
+    )
+
+    response = authenticated_client.post(
+        reverse("generate-planned-substitutions"),
+        {
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+            "next": next_url,
+        },
+        follow=True,
+    )
+
+    lesson = Lesson.objects.get()
+    assert lesson.planned_substitute == substitute
+    assert response.redirect_chain == [(next_url, 302)]
+    assert b"Planned substitutions generated." in response.content
+    assert b"Sub: Grace" in response.content
+
+
+@pytest.mark.django_db
 def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client):
     AcademicYear.objects.create(name="2026")
 
