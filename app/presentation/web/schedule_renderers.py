@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from django.urls import reverse
+
 from app.application.ports.repositories import ScheduledLesson
 from app.domain.models import Day, Period, PeriodKind
 
@@ -17,6 +19,8 @@ class WholeSchoolLessonCard:
     subject: str
     teacher: str
     student_group: str
+    planned_substitute: str
+    edit_url: str
     column: int
     lane: int
 
@@ -99,6 +103,10 @@ class WholeSchoolTimetableRenderer:
                     subject=self.short_subject(lesson.subject_name),
                     teacher=self.short_teacher(lesson.teacher_name),
                     student_group=lesson.student_group_name,
+                    planned_substitute=self.short_teacher(
+                        lesson.planned_substitute_name
+                    ),
+                    edit_url=reverse("lesson-update", args=[lesson.id]),
                     column=start_index + 2,
                     lane=lane + 1,
                 )

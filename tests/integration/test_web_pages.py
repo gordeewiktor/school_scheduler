@@ -197,6 +197,105 @@ def test_focused_timetable_keeps_existing_table_renderer(
 
 
 @pytest.mark.django_db
+def test_schedule_defaults_to_latest_academic_year(authenticated_client):
+    older = AcademicYear.objects.create(name="2025")
+    newer = AcademicYear.objects.create(name="2026")
+    Period.objects.create(
+        academic_year=older,
+        name="Old Period",
+        order=1,
+        start_time=time(8),
+        end_time=time(9),
+    )
+    Period.objects.create(
+        academic_year=newer,
+        name="Current Period",
+        order=1,
+        start_time=time(8),
+        end_time=time(9),
+    )
+
+    response = authenticated_client.get(reverse("schedule"), {"view": "whole_school"})
+
+    assert response.context["selected_academic_year"] == str(newer.pk)
+    assert b"Current Period" in response.content
+    assert b"Old Period" not in response.content
+
+
+@pytest.mark.django_db
+def test_timetable_lessons_link_to_existing_edit_flow(
+    authenticated_client, lesson_form_data
+):
+    authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
+    lesson = Lesson.objects.get()
+
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "teacher",
+            "teacher": lesson_form_data["teacher"].pk,
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert reverse("lesson-update", args=[lesson.pk]).encode() in response.content
+
+
+@pytest.mark.django_db
+def test_timetable_displays_planned_substitute(
+    authenticated_client, lesson_form_data
+):
+    substitute = Teacher.objects.create(name="Grace")
+    Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        planned_substitute=substitute,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "teacher",
+            "teacher": lesson_form_data["teacher"].pk,
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert b"Sub: Grace" in response.content
+
+
+@pytest.mark.django_db
+def test_whole_school_cards_link_to_edit_and_display_planned_substitute(
+    authenticated_client, lesson_form_data
+):
+    substitute = Teacher.objects.create(name="Grace")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        planned_substitute=substitute,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "whole_school",
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert reverse("lesson-update", args=[lesson.pk]).encode() in response.content
+    assert b"Sub: Grace" in response.content
+
+
+@pytest.mark.django_db
 def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client):
     AcademicYear.objects.create(name="2026")
 

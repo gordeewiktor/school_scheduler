@@ -386,6 +386,7 @@ class ScheduleViewChoice:
     value: str
     label: str
     description: str
+    is_primary: bool = True
 
 
 @dataclass(frozen=True)
@@ -407,6 +408,7 @@ class SchedulePageState:
     waiting_for_selection: bool
     show_timetable: bool
     missing_academic_year: bool
+    selected_academic_year_name: str
 
 
 class ScheduleView(LoginRequiredMixin, TemplateView):
@@ -417,9 +419,17 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
         ScheduleViewChoice(
             "student_group", "Student Group", "View one student group's week"
         ),
-        ScheduleViewChoice("room", "Room", "View one room's week"),
         ScheduleViewChoice(
-            "whole_school", "Whole School", "View the complete master timetable"
+            "whole_school",
+            "Whole School",
+            "View the complete master timetable",
+            is_primary=False,
+        ),
+        ScheduleViewChoice(
+            "room",
+            "Room",
+            "View one room's week",
+            is_primary=False,
         ),
     )
     ENTITY_VIEWS = {
@@ -465,6 +475,8 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
             academic_year = academic_years.filter(pk=int(academic_year_id)).first()
             if academic_year is not None:
                 return academic_year
+        # AcademicYear is ordered newest first, so this is the current year until
+        # the domain grows explicit academic-year dates.
         return academic_years.first()
 
     def _selector(self, current_view: str) -> ScheduleSelector | None:
@@ -524,6 +536,7 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
             waiting_for_selection=waiting_for_selection,
             show_timetable=show_timetable,
             missing_academic_year=bool(current_view and academic_year is None),
+            selected_academic_year_name=str(academic_year) if academic_year else "",
         )
         focused_rows = []
         whole_school_timetable = None

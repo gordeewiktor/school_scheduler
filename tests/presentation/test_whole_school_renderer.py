@@ -22,6 +22,7 @@ def lesson(
     start_period: Period,
     subject: str = "Mathematics",
     teacher: str = "Teacher Bobby",
+    planned_substitute: str = "",
 ) -> ScheduledLesson:
     return ScheduledLesson(
         id=identifier,
@@ -34,6 +35,7 @@ def lesson(
         student_group_name=f"EP{identifier}",
         day=Day.MONDAY,
         start_period=start_period,
+        planned_substitute_name=planned_substitute,
     )
 
 
@@ -53,6 +55,7 @@ def test_whole_school_renderer_stacks_concurrent_cards():
         (2, 1),
         (2, 2),
     ]
+    assert monday.cards[0].edit_url == "/lessons/1/edit/"
 
 
 def test_whole_school_renderer_uses_compact_display_names_without_room():
@@ -67,6 +70,21 @@ def test_whole_school_renderer_uses_compact_display_names_without_room():
     assert card.teacher == "Bobby"
     assert card.student_group == "EP1"
     assert not hasattr(card, "room")
+
+
+def test_whole_school_renderer_includes_compact_planned_substitute():
+    first_period = period(1, 1)
+
+    timetable = WholeSchoolTimetableRenderer().render(
+        {
+            Day.MONDAY: [
+                lesson(1, first_period, planned_substitute="Teacher Grace Hopper")
+            ]
+        },
+        [first_period],
+    )
+
+    assert timetable.rows[0].cards[0].planned_substitute == "Grace Hopper"
 
 
 def test_whole_school_renderer_marks_break_columns():

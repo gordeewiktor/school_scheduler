@@ -4,22 +4,41 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h2">Schedule</h1>
-    {% if user.is_staff %}
-        <a class="btn btn-primary" href="{% url 'lesson-create' %}">Add Lesson</a>
-    {% endif %}
+    <div>
+        <h1 class="h2">Schedule</h1>
+        {% if page.selected_academic_year_name %}
+            <p class="text-muted schedule-subtitle">
+                {{ page.selected_academic_year_name }}{% if page.current_view_label %} · {{ page.current_view_label }} timetable{% endif %}
+            </p>
+        {% endif %}
+    </div>
+    <div class="schedule-actions">
+        {% if user.is_staff %}
+            {# TODO: Add Generate Planned Substitutions here once generation is implemented. #}
+            <a class="btn btn-primary" href="{% url 'lesson-create' %}">Add Lesson</a>
+        {% endif %}
+    </div>
 </div>
 
 {% if page.waiting_for_view %}
     <section class="schedule-start">
         <h2 class="h3">Choose what you want to view</h2>
-        <p class="text-muted">Start with the timetable that is relevant to you.</p>
+        <p class="text-muted">Start with the timetable you want to work on.</p>
         <div class="schedule-view-grid">
             {% for choice in page.view_choices %}
+                {% if choice.is_primary %}
                 <a class="schedule-view-card" href="?view={{ choice.value }}">
                     <strong>{{ choice.label }}</strong>
                     <span>{{ choice.description }}</span>
                 </a>
+                {% endif %}
+            {% endfor %}
+        </div>
+        <div class="schedule-secondary-views">
+            {% for choice in page.view_choices %}
+                {% if not choice.is_primary %}
+                    <a href="?view={{ choice.value }}">{{ choice.label }}</a>
+                {% endif %}
             {% endfor %}
         </div>
     </section>
@@ -78,9 +97,20 @@
                     </div>
                 {% endfor %}
                 {% for card in row.cards %}
+                    {% if user.is_staff %}
+                    <a class="whole-school-lesson" href="{{ card.edit_url }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" aria-label="Edit {{ card.subject }} lesson">
+                    {% else %}
                     <div class="whole-school-lesson" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}">
+                    {% endif %}
                         <strong>{{ card.subject }}</strong><span aria-hidden="true"> · </span>{{ card.teacher }}<span aria-hidden="true"> · </span>{{ card.student_group }}
+                        {% if card.planned_substitute %}
+                            <span class="planned-substitute">Sub: {{ card.planned_substitute }}</span>
+                        {% endif %}
+                    {% if user.is_staff %}
+                    </a>
+                    {% else %}
                     </div>
+                    {% endif %}
                 {% endfor %}
             </div>
         {% endfor %}
@@ -107,8 +137,17 @@
                 {% for cell in row.cells %}
                     <td {% if cell.kind == "break" %}style="background:#f2f2f2; text-align:center"{% endif %}>
                         {% if cell.kind == "lesson" %}
+                            {% if user.is_staff %}
+                                <a class="focused-lesson-link" href="{% url 'lesson-update' cell.lesson.id %}">
+                            {% endif %}
                             <strong>{{ cell.lesson.subject_name }}</strong><br>
                             <span class="small">{{ cell.lesson.teacher_name }} · {{ cell.lesson.student_group_name }} · {{ cell.lesson.room_name }}</span>
+                            {% if cell.lesson.planned_substitute_name %}
+                                <br><span class="small planned-substitute">Sub: {{ cell.lesson.planned_substitute_name }}</span>
+                            {% endif %}
+                            {% if user.is_staff %}
+                                </a>
+                            {% endif %}
                         {% elif cell.kind == "break" %}
                             <span class="text-muted">{{ cell.period.name }}</span>
                         {% endif %}
@@ -125,10 +164,13 @@
 {% endif %}
 <style>
     .schedule-start { max-width: 760px; margin: 4rem auto; text-align: center; }
+    .schedule-subtitle { margin: 0.2rem 0 0; }
+    .schedule-actions { display: flex; gap: 0.5rem; align-items: center; }
     .schedule-view-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem; text-align: left; }
     .schedule-view-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 1.25rem; border: 1px solid #d7dce2; border-radius: 8px; background: #fff; color: #222; }
     .schedule-view-card:hover { border-color: #0b5cad; text-decoration: none; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08); }
     .schedule-view-card span { color: #666; font-size: 0.9rem; }
+    .schedule-secondary-views { display: flex; justify-content: center; gap: 1rem; margin-top: 1rem; font-size: 0.95rem; }
     .schedule-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
     .schedule-control { flex: 1 1 240px; max-width: 360px; }
     .schedule-back { margin-left: auto; }
@@ -146,7 +188,10 @@
     .whole-school-slot { grid-row: 1 / span var(--lane-count); min-height: 30px; border-right: 1px solid #e3e6e9; background: #fff; }
     .whole-school-slot.is-break, .whole-school-period-heading.is-break { background: #f1f2f3; }
     .whole-school-slot span { display: block; padding: 0.35rem 0.2rem; color: #777; font-size: 0.68rem; text-align: center; }
-    .whole-school-lesson { z-index: 3; align-self: stretch; min-width: 0; margin: 2px; padding: 0.25rem 0.35rem; border-left: 3px solid #0b5cad; border-radius: 3px; background: #eaf3fc; font-size: 0.75rem; line-height: 1.2; overflow-wrap: anywhere; }
+    .whole-school-lesson { z-index: 3; align-self: stretch; min-width: 0; margin: 2px; padding: 0.25rem 0.35rem; border-left: 3px solid #0b5cad; border-radius: 3px; background: #eaf3fc; color: #222; font-size: 0.75rem; line-height: 1.2; overflow-wrap: anywhere; }
+    a.whole-school-lesson:hover, .focused-lesson-link:hover { text-decoration: none; }
+    .focused-lesson-link { display: block; color: inherit; }
+    .planned-substitute { display: block; margin-top: 0.15rem; color: #4f5f2f; }
 </style>
 <script>
         document.addEventListener("DOMContentLoaded", () => {

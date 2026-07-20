@@ -138,7 +138,12 @@ class DjangoLessonRepository:
     @staticmethod
     def _base_queryset():
         return Lesson.objects.select_related(
-            "teacher", "subject", "room", "student_group", "start_period"
+            "teacher",
+            "planned_substitute",
+            "subject",
+            "room",
+            "student_group",
+            "start_period",
         )
 
     @staticmethod
@@ -155,6 +160,12 @@ class DjangoLessonRepository:
                 student_group_name=lesson.student_group.name,
                 day=Day(lesson.day),
                 start_period=lesson.start_period.to_domain(),
+                planned_substitute_id=lesson.planned_substitute_id,
+                planned_substitute_name=(
+                    lesson.planned_substitute.name
+                    if lesson.planned_substitute_id is not None
+                    else ""
+                ),
                 notes=lesson.notes,
             )
             for lesson in queryset

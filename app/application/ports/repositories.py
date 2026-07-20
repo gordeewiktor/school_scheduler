@@ -19,6 +19,8 @@ class ScheduledLesson:
     student_group_name: str
     day: Day
     start_period: Period
+    planned_substitute_id: int | None = None
+    planned_substitute_name: str = ""
     notes: str = ""
 
 
