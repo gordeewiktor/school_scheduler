@@ -72,10 +72,11 @@ def test_login_page_renders(client):
 
 
 @pytest.mark.django_db
-def test_schedule_home_requires_login(client):
+def test_schedule_home_is_public(client):
     response = client.get(reverse("schedule"))
-    assert response.status_code == 302
-    assert reverse("login") in response["Location"]
+    assert response.status_code == 200
+    assert b">Timetable<" in response.content
+    assert b"Principal Login" in response.content
     assert reverse("schedule") == "/"
 
 
@@ -382,7 +383,7 @@ def test_administrator_navigation(authenticated_client):
     response = authenticated_client.get(reverse("schedule"))
 
     assert response.status_code == 200
-    assert b">Schedule<" in response.content
+    assert b">Timetable<" in response.content
     assert b">Lessons<" in response.content
     assert b">Admin<" in response.content
     assert b">Teacher Substitution<" not in response.content
@@ -395,22 +396,16 @@ def test_regular_user_navigation(regular_client):
     response = regular_client.get(reverse("schedule"))
 
     assert response.status_code == 200
-    assert b">Schedule<" in response.content
-    assert b">Teacher Substitution<" in response.content
+    assert b">Timetable<" in response.content
+    assert b">Teacher Substitution<" not in response.content
     assert b">Lessons<" not in response.content
     assert b">Admin<" not in response.content
     assert b"Whole School" not in response.content
 
 
 @pytest.mark.django_db
-def test_teacher_substitution_placeholder_is_available(regular_client):
-    response = regular_client.get(reverse("teacher-substitution"))
-
-    assert response.status_code == 200
-    assert b"Show available teachers" in response.content
-    assert b'name="academic_year"' in response.content
-    assert b'name="day"' in response.content
-    assert b'name="period"' in response.content
+def test_teacher_substitution_lookup_requires_principal(regular_client):
+    assert regular_client.get(reverse("teacher-substitution")).status_code == 403
 
 
 @pytest.mark.django_db
@@ -428,11 +423,19 @@ def test_regular_user_cannot_access_administration_pages(regular_client):
 
 
 @pytest.mark.django_db
-def test_regular_user_can_access_focused_schedule(regular_client):
+def test_public_user_cannot_access_administration_pages(client):
+    assert client.get(reverse("lesson-list")).status_code == 302
+    assert client.get(reverse("teacher-list")).status_code == 302
+    assert client.get(reverse("generate-planned-substitutions")).status_code == 302
+    assert client.post(reverse("generate-planned-substitutions")).status_code == 302
+
+
+@pytest.mark.django_db
+def test_public_user_can_access_focused_schedule(client):
     year = AcademicYear.objects.create(name="2026")
     teacher = Teacher.objects.create(name="Ada")
 
-    response = regular_client.get(
+    response = client.get(
         reverse("schedule"),
         {"view": "teacher", "teacher": teacher.pk, "academic_year": year.pk},
     )
@@ -442,8 +445,44 @@ def test_regular_user_can_access_focused_schedule(regular_client):
 
 
 @pytest.mark.django_db
+def test_public_user_can_access_student_group_and_room_schedules(client):
+    year = AcademicYear.objects.create(name="2026")
+    student_group = StudentGroup.objects.create(name="Grade 1")
+    room = Room.objects.create(name="A101")
+
+    student_group_response = client.get(
+        reverse("schedule"),
+        {
+            "view": "student_group",
+            "student_group": student_group.pk,
+            "academic_year": year.pk,
+        },
+    )
+    room_response = client.get(
+        reverse("schedule"),
+        {
+            "view": "room",
+            "room": room.pk,
+            "academic_year": year.pk,
+        },
+    )
+
+    assert student_group_response.status_code == 200
+    assert room_response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_public_user_cannot_access_whole_school_schedule(client):
+    AcademicYear.objects.create(name="2026")
+
+    response = client.get(reverse("schedule"), {"view": "whole_school"})
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
 def test_teacher_substitution_form_submission_lists_available_teachers(
-    regular_client, lesson_form_data
+    authenticated_client, lesson_form_data
 ):
     busy_teacher = lesson_form_data["teacher"]
     free_teacher = Teacher.objects.create(name="Grace")
@@ -456,7 +495,7 @@ def test_teacher_substitution_form_submission_lists_available_teachers(
         start_period=lesson_form_data["start_period"],
     )
 
-    response = regular_client.get(
+    response = authenticated_client.get(
         reverse("teacher-substitution"),
         {
             "academic_year": lesson_form_data["start_period"].academic_year_id,

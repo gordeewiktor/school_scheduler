@@ -72,6 +72,8 @@
                 {% csrf_token %}
                 <button class="btn btn-outline-light btn-sm" type="submit">Logout</button>
             </form>
+        {% else %}
+            <a class="btn btn-outline-light btn-sm" href="{% url 'login' %}">Principal Login</a>
         {% endif %}
     </div>
 </nav>

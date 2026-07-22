@@ -412,7 +412,7 @@ class SchedulePageState:
     selected_academic_year_name: str
 
 
-class ScheduleView(LoginRequiredMixin, TemplateView):
+class ScheduleView(TemplateView):
     template_name = "scheduler/schedule.html"
 
     VIEW_CHOICES = (
@@ -456,8 +456,7 @@ class ScheduleView(LoginRequiredMixin, TemplateView):
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if (
-            request.user.is_authenticated
-            and request.GET.get("view") == "whole_school"
+            request.GET.get("view") == "whole_school"
             and not request.user.is_staff
         ):
             raise PermissionDenied
@@ -583,7 +582,7 @@ class GeneratePlannedSubstitutionsView(AdministratorRequiredMixin, View):
         return redirect(next_url)
 
 
-class TeacherSubstitutionView(LoginRequiredMixin, TemplateView):
+class TeacherSubstitutionView(AdministratorRequiredMixin, TemplateView):
     template_name = "scheduler/teacher_substitution.html"
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
