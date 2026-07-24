@@ -67,10 +67,16 @@ class PeriodForm(BaseStyledModelForm):
 
 
 class LessonForm(BaseStyledModelForm):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["planned_substitute"].label = "Substitution Teacher"
+        self.fields["planned_substitute"].empty_label = "No substitution teacher"
+
     class Meta:
         model = Lesson
         fields = [
             "teacher",
+            "planned_substitute",
             "subject",
             "room",
             "student_group",

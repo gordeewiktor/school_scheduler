@@ -177,7 +177,7 @@ def test_whole_school_cards_use_compact_names_and_omit_room(
 
 
 @pytest.mark.django_db
-def test_focused_timetable_keeps_existing_table_renderer(
+def test_focused_timetable_uses_adaptive_lesson_cards(
     authenticated_client, lesson_form_data
 ):
     authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
@@ -192,8 +192,10 @@ def test_focused_timetable_keeps_existing_table_renderer(
     )
 
     assert b"<table" in response.content
-    assert b'colspan="2"' not in response.content
+    assert b"lesson-card" in response.content
     assert b"A101" in response.content
+    assert b"Grade 1" in response.content
+    assert b'>Ada</span>' not in response.content
     assert b'<div class="whole-school-grid"' not in response.content
 
 
@@ -313,6 +315,21 @@ def test_schedule_shows_generate_planned_substitutions_button(
 
 
 @pytest.mark.django_db
+def test_generation_buttons_require_confirmation(authenticated_client, lesson_form_data):
+    response = authenticated_client.get(
+        reverse("schedule"),
+        {
+            "view": "whole_school",
+            "academic_year": lesson_form_data["start_period"].academic_year_id,
+        },
+    )
+
+    assert b"return confirm(" in response.content
+    assert b"Generate planned substitutions?" in response.content
+    assert b"Existing automatically generated substitutions may be replaced." in response.content
+
+
+@pytest.mark.django_db
 def test_generate_planned_substitutions_updates_timetable(
     authenticated_client, lesson_form_data
 ):
@@ -345,6 +362,141 @@ def test_generate_planned_substitutions_updates_timetable(
     assert response.redirect_chain == [(next_url, 302)]
     assert b"Planned substitutions generated." in response.content
     assert b"Sub: Grace" in response.content
+
+
+@pytest.mark.django_db
+def test_lesson_edit_form_displays_current_substitution_teacher(
+    authenticated_client, lesson_form_data
+):
+    substitute = Teacher.objects.create(name="Grace")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        planned_substitute=substitute,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+
+    response = authenticated_client.get(reverse("lesson-update", args=[lesson.pk]))
+
+    assert response.status_code == 200
+    assert b"Substitution Teacher" in response.content
+    assert b"No substitution teacher" in response.content
+    assert f'value="{substitute.pk}" selected'.encode() in response.content
+
+
+@pytest.mark.django_db
+def test_lesson_edit_can_add_substitution_teacher(authenticated_client, lesson_form_data):
+    substitute = Teacher.objects.create(name="Grace")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    data = post_data(lesson_form_data)
+    data["planned_substitute"] = substitute.pk
+
+    response = authenticated_client.post(reverse("lesson-update", args=[lesson.pk]), data)
+
+    lesson.refresh_from_db()
+    assert response.status_code == 302
+    assert lesson.planned_substitute == substitute
+
+
+@pytest.mark.django_db
+def test_lesson_edit_can_change_substitution_teacher(authenticated_client, lesson_form_data):
+    original = Teacher.objects.create(name="Grace")
+    replacement = Teacher.objects.create(name="Katherine")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        planned_substitute=original,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    data = post_data(lesson_form_data)
+    data["planned_substitute"] = replacement.pk
+
+    response = authenticated_client.post(reverse("lesson-update", args=[lesson.pk]), data)
+
+    lesson.refresh_from_db()
+    assert response.status_code == 302
+    assert lesson.planned_substitute == replacement
+
+
+@pytest.mark.django_db
+def test_lesson_edit_can_remove_substitution_teacher(authenticated_client, lesson_form_data):
+    substitute = Teacher.objects.create(name="Grace")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        planned_substitute=substitute,
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    data = post_data(lesson_form_data)
+    data["planned_substitute"] = ""
+
+    response = authenticated_client.post(reverse("lesson-update", args=[lesson.pk]), data)
+
+    lesson.refresh_from_db()
+    assert response.status_code == 302
+    assert lesson.planned_substitute is None
+
+
+@pytest.mark.django_db
+def test_lesson_edit_validates_substitution_teacher(authenticated_client, lesson_form_data):
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    data = post_data(lesson_form_data)
+    data["planned_substitute"] = "9999"
+
+    response = authenticated_client.post(reverse("lesson-update", args=[lesson.pk]), data)
+
+    lesson.refresh_from_db()
+    assert response.status_code == 200
+    assert "Select a valid choice." in response.context["form"].errors["planned_substitute"][0]
+    assert lesson.planned_substitute is None
+
+
+@pytest.mark.django_db
+def test_existing_lesson_editing_continues_to_update_core_fields(
+    authenticated_client, lesson_form_data
+):
+    new_room = Room.objects.create(name="B202")
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    data = post_data(lesson_form_data)
+    data["room"] = new_room.pk
+    data["notes"] = "Bring lab materials."
+
+    response = authenticated_client.post(reverse("lesson-update", args=[lesson.pk]), data)
+
+    lesson.refresh_from_db()
+    assert response.status_code == 302
+    assert lesson.room == new_room
+    assert lesson.notes == "Bring lab materials."
 
 
 @pytest.mark.django_db

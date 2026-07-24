@@ -3,7 +3,11 @@ from dataclasses import dataclass
 from django.urls import reverse
 
 from app.application.ports.repositories import ScheduledLesson
+from app.application.services.schedules import TimetableRow
 from app.domain.models import Day, Period, PeriodKind
+
+
+SUBJECT_PALETTE_SIZE = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +25,8 @@ class WholeSchoolLessonCard:
     student_group: str
     planned_substitute: str
     edit_url: str
+    color_class: str
+    detail_title: str
     column: int
     lane: int
 
@@ -39,9 +45,7 @@ class WholeSchoolTimetable:
     rows: tuple[WholeSchoolDayRow, ...]
 
 
-class WholeSchoolTimetableRenderer:
-    """Builds the compact, card-based presentation model for the master timetable."""
-
+class LessonDisplayMixin:
     SUBJECT_ALIASES = {
         "mathematics": "Math",
         "physical education": "PE",
@@ -61,6 +65,45 @@ class WholeSchoolTimetableRenderer:
         "dr. ",
         "dr ",
     )
+
+    @classmethod
+    def short_subject(cls, name: str) -> str:
+        return cls.SUBJECT_ALIASES.get(name.strip().casefold(), name.strip())
+
+    @classmethod
+    def short_teacher(cls, name: str) -> str:
+        display_name = name.strip()
+        lowered_name = display_name.casefold()
+        for prefix in cls.TEACHER_PREFIXES:
+            if lowered_name.startswith(prefix):
+                shortened = display_name[len(prefix) :].strip()
+                return shortened or display_name
+        return display_name
+
+    @staticmethod
+    def subject_color_class(subject_name: str) -> str:
+        normalized_name = subject_name.strip().casefold()
+        color_index = sum(ord(character) for character in normalized_name)
+        return f"subject-color-{color_index % SUBJECT_PALETTE_SIZE}"
+
+    @staticmethod
+    def detail_title(lesson: ScheduledLesson, *, include_room: bool = True) -> str:
+        details = [
+            lesson.subject_name,
+            f"Teacher: {lesson.teacher_name}",
+            f"Group: {lesson.student_group_name}",
+        ]
+        if include_room:
+            details.append(f"Room: {lesson.room_name}")
+        if lesson.planned_substitute_name:
+            details.append(f"Substitute: {lesson.planned_substitute_name}")
+        if lesson.notes:
+            details.append(f"Notes: {lesson.notes}")
+        return "\n".join(details)
+
+
+class WholeSchoolTimetableRenderer(LessonDisplayMixin):
+    """Builds the compact, card-based presentation model for the master timetable."""
 
     def render(
         self,
@@ -107,6 +150,8 @@ class WholeSchoolTimetableRenderer:
                         lesson.planned_substitute_name
                     ),
                     edit_url=reverse("lesson-update", args=[lesson.id]),
+                    color_class=self.subject_color_class(lesson.subject_name),
+                    detail_title=self.detail_title(lesson, include_room=False),
                     column=start_index + 2,
                     lane=lane + 1,
                 )
@@ -128,16 +173,91 @@ class WholeSchoolTimetableRenderer:
         occupied_by_lane.append(set(occupied))
         return len(occupied_by_lane) - 1
 
-    @classmethod
-    def short_subject(cls, name: str) -> str:
-        return cls.SUBJECT_ALIASES.get(name.strip().casefold(), name.strip())
 
-    @classmethod
-    def short_teacher(cls, name: str) -> str:
-        display_name = name.strip()
-        lowered_name = display_name.casefold()
-        for prefix in cls.TEACHER_PREFIXES:
-            if lowered_name.startswith(prefix):
-                shortened = display_name[len(prefix) :].strip()
-                return shortened or display_name
-        return display_name
+@dataclass(frozen=True, slots=True)
+class FocusedLessonDetail:
+    label: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedLessonCard:
+    lesson_id: int
+    subject: str
+    details: tuple[FocusedLessonDetail, ...]
+    planned_substitute: str
+    edit_url: str
+    color_class: str
+    detail_title: str
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedTimetableCell:
+    period: Period
+    kind: str
+    card: FocusedLessonCard | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedTimetableRow:
+    day: Day
+    cells: tuple[FocusedTimetableCell, ...]
+
+
+class FocusedTimetableRenderer(LessonDisplayMixin):
+    """Adapts lesson cards to the currently selected timetable context."""
+
+    DETAIL_LABELS_BY_VIEW = {
+        "student_group": (("Teacher", "teacher_name"), ("Room", "room_name")),
+        "teacher": (("Group", "student_group_name"), ("Room", "room_name")),
+        "room": (("Teacher", "teacher_name"), ("Group", "student_group_name")),
+    }
+
+    def render(
+        self,
+        rows: list[TimetableRow],
+        current_view: str,
+    ) -> tuple[FocusedTimetableRow, ...]:
+        return tuple(
+            FocusedTimetableRow(
+                day=row.day,
+                cells=tuple(
+                    FocusedTimetableCell(
+                        period=cell.period,
+                        kind=cell.kind,
+                        card=(
+                            self._card(cell.lesson, current_view)
+                            if cell.lesson is not None
+                            else None
+                        ),
+                    )
+                    for cell in row.cells
+                ),
+            )
+            for row in rows
+        )
+
+    def _card(
+        self,
+        lesson: ScheduledLesson,
+        current_view: str,
+    ) -> FocusedLessonCard:
+        return FocusedLessonCard(
+            lesson_id=lesson.id,
+            subject=self.short_subject(lesson.subject_name),
+            details=self._details(lesson, current_view),
+            planned_substitute=self.short_teacher(lesson.planned_substitute_name),
+            edit_url=reverse("lesson-update", args=[lesson.id]),
+            color_class=self.subject_color_class(lesson.subject_name),
+            detail_title=self.detail_title(lesson),
+        )
+
+    def _details(
+        self,
+        lesson: ScheduledLesson,
+        current_view: str,
+    ) -> tuple[FocusedLessonDetail, ...]:
+        return tuple(
+            FocusedLessonDetail(label=label, value=getattr(lesson, attribute))
+            for label, attribute in self.DETAIL_LABELS_BY_VIEW.get(current_view, ())
+        )

@@ -5,14 +5,20 @@ from datetime import time
 
 from django.core.management.base import BaseCommand
 
+from app.application.services.conflicts import ConflictService
+from app.application.services.schedules import ScheduleService
+from app.application.services.substitution_service import SubstitutionService
 from app.infrastructure.database.models import (
     AcademicYear,
+    Lesson,
     Period,
     Room,
     StudentGroup,
     Subject,
     Teacher,
 )
+from app.infrastructure.repositories.django_lessons import DjangoLessonRepository
+from app.management.demo_timetable import DemoTimetableGenerator
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +30,7 @@ class DemoPeriod:
 
 
 class Command(BaseCommand):
-    help = "Load complete demo school master data without creating lessons."
+    help = "Load complete demo school data, including a generated timetable."
 
     ACADEMIC_YEAR_NAME = "Demo 2026"
 
@@ -57,12 +63,40 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options) -> None:
+        self.stdout.write("Loading demo school...")
+        self.stdout.write("")
+
+        self.stdout.write("Creating academic year and periods...")
         academic_year = self._load_academic_year()
         self._load_periods(academic_year)
+        self.stdout.write(self.style.SUCCESS("OK"))
+
+        self.stdout.write("Creating teachers...")
         self._load_teachers()
+        self.stdout.write(self.style.SUCCESS("OK"))
+
+        self.stdout.write("Creating student groups...")
         self._load_student_groups()
+        self.stdout.write(self.style.SUCCESS("OK"))
+
+        self.stdout.write("Creating rooms...")
         self._load_rooms()
+        self.stdout.write(self.style.SUCCESS("OK"))
+
+        self.stdout.write("Creating subjects...")
         self._load_subjects()
+        self.stdout.write(self.style.SUCCESS("OK"))
+
+        self.stdout.write("Generating timetable...")
+        self._clear_lessons(academic_year)
+        result = self._generate_timetable(academic_year)
+        self.stdout.write(self.style.SUCCESS("########## 100%"))
+        self.stdout.write(f"Lessons created: {result.lessons_created}")
+
+        self.stdout.write("Generating planned substitutions...")
+        self._substitution_service().generate_planned_substitutions(academic_year.id)
+        self.stdout.write(self.style.SUCCESS("OK"))
+        self.stdout.write("")
 
         self.stdout.write(self.style.SUCCESS("Demo school loaded successfully."))
         self.stdout.write("")
@@ -79,6 +113,12 @@ class Command(BaseCommand):
             "Breaks: "
             f"{Period.objects.filter(academic_year=academic_year, kind=Period.Kind.BREAK).count()}"
         )
+        self.stdout.write(
+            "Lessons: "
+            f"{Lesson.objects.filter(start_period__academic_year=academic_year).count()}"
+        )
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS("Done."))
 
     def _load_academic_year(self) -> AcademicYear:
         existing = AcademicYear.objects.first()
@@ -129,3 +169,46 @@ class Command(BaseCommand):
                 name=name,
                 defaults={"code": code},
             )
+
+    def _clear_lessons(self, academic_year: AcademicYear) -> None:
+        Lesson.objects.filter(start_period__academic_year=academic_year).delete()
+
+    def _generate_timetable(self, academic_year: AcademicYear):
+        generator = DemoTimetableGenerator(self._schedule_service())
+        return generator.generate(
+            academic_year_id=academic_year.id,
+            student_groups=self._demo_student_groups(),
+            rooms=self._demo_rooms(),
+            subjects=self._demo_subjects(),
+            teachers=self._demo_teachers(),
+        )
+
+    @staticmethod
+    def _schedule_service() -> ScheduleService:
+        repository = DjangoLessonRepository()
+        return ScheduleService(repository, ConflictService(repository))
+
+    @staticmethod
+    def _substitution_service() -> SubstitutionService:
+        return SubstitutionService(DjangoLessonRepository())
+
+    @staticmethod
+    def _demo_teachers() -> list[Teacher]:
+        names = [f"Teacher {index:02d}" for index in range(1, 81)]
+        return list(Teacher.objects.filter(name__in=names).order_by("name"))
+
+    @staticmethod
+    def _demo_student_groups() -> list[StudentGroup]:
+        names = [f"Class {index:02d}" for index in range(1, 51)]
+        return list(StudentGroup.objects.filter(name__in=names).order_by("name"))
+
+    @staticmethod
+    def _demo_rooms() -> list[Room]:
+        names = [f"Room {index:02d}" for index in range(1, 51)]
+        return list(Room.objects.filter(name__in=names).order_by("name"))
+
+    def _demo_subjects(self) -> list[Subject]:
+        return [
+            Subject.objects.get(name=name)
+            for name, _code in self.SUBJECTS
+        ]

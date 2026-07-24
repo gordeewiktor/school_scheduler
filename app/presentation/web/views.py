@@ -34,7 +34,10 @@ from app.presentation.web.forms import (
     PeriodForm,
     TeacherSubstitutionForm,
 )
-from app.presentation.web.schedule_renderers import WholeSchoolTimetableRenderer
+from app.presentation.web.schedule_renderers import (
+    FocusedTimetableRenderer,
+    WholeSchoolTimetableRenderer,
+)
 
 
 class AdministratorRequiredMixin(LoginRequiredMixin):
@@ -90,11 +93,27 @@ class SchedulerCreateView(AdministratorRequiredMixin, SuccessMessageMixin, Creat
     list_url_name = ""
 
     def get_success_url(self) -> str:
-        return reverse_lazy(self.list_url_name)
+        return self._safe_next_url() or reverse_lazy(self.list_url_name)
+
+    def _safe_next_url(self) -> str:
+        next_url = self.request.POST.get("next") or self.request.GET.get("next", "")
+        if url_has_allowed_host_and_scheme(
+            next_url,
+            allowed_hosts={self.request.get_host()},
+            require_https=self.request.is_secure(),
+        ):
+            return next_url
+        return ""
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context.update({"title": self.title, "list_url_name": self.list_url_name})
+        context.update(
+            {
+                "title": self.title,
+                "list_url_name": self.list_url_name,
+                "return_url": self._safe_next_url(),
+            }
+        )
         return context
 
 
@@ -105,11 +124,27 @@ class SchedulerUpdateView(AdministratorRequiredMixin, SuccessMessageMixin, Updat
     list_url_name = ""
 
     def get_success_url(self) -> str:
-        return reverse_lazy(self.list_url_name)
+        return self._safe_next_url() or reverse_lazy(self.list_url_name)
+
+    def _safe_next_url(self) -> str:
+        next_url = self.request.POST.get("next") or self.request.GET.get("next", "")
+        if url_has_allowed_host_and_scheme(
+            next_url,
+            allowed_hosts={self.request.get_host()},
+            require_https=self.request.is_secure(),
+        ):
+            return next_url
+        return ""
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        context.update({"title": self.title, "list_url_name": self.list_url_name})
+        context.update(
+            {
+                "title": self.title,
+                "list_url_name": self.list_url_name,
+                "return_url": self._safe_next_url(),
+            }
+        )
         return context
 
 
@@ -343,6 +378,11 @@ class LessonWriteMixin:
                 student_group_id=cleaned["student_group"].pk,
                 day=Day(cleaned["day"]),
                 start_period_id=cleaned["start_period"].pk,
+                planned_substitute_id=(
+                    cleaned["planned_substitute"].pk
+                    if cleaned["planned_substitute"] is not None
+                    else None
+                ),
                 notes=cleaned["notes"],
             )
             if self.is_update:
@@ -545,7 +585,10 @@ class ScheduleView(TemplateView):
                 grouped_schedule, periods
             )
         elif show_timetable:
-            focused_rows = service.timetable_rows(grouped_schedule, periods)
+            focused_rows = FocusedTimetableRenderer().render(
+                service.timetable_rows(grouped_schedule, periods),
+                current_view,
+            )
 
         context.update(
             {

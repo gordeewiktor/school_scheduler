@@ -15,7 +15,7 @@
     <div class="schedule-actions">
         {% if user.is_staff %}
             {% if selected_academic_year %}
-                <form method="post" action="{% url 'generate-planned-substitutions' %}">
+                <form method="post" action="{% url 'generate-planned-substitutions' %}" onsubmit="return confirm('Generate planned substitutions?\n\nExisting automatically generated substitutions may be replaced.\n\nDo you want to continue?');">
                     {% csrf_token %}
                     <input type="hidden" name="academic_year" value="{{ selected_academic_year }}">
                     <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -105,9 +105,9 @@
                 {% endfor %}
                 {% for card in row.cards %}
                     {% if user.is_staff %}
-                    <a class="whole-school-lesson" href="{{ card.edit_url }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" aria-label="Edit {{ card.subject }} lesson">
+                    <a class="whole-school-lesson {{ card.color_class }}" href="{{ card.edit_url }}?next={{ request.get_full_path|urlencode }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" title="{{ card.detail_title }}" aria-label="Edit {{ card.subject }} lesson">
                     {% else %}
-                    <div class="whole-school-lesson" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}">
+                    <div class="whole-school-lesson {{ card.color_class }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" title="{{ card.detail_title }}">
                     {% endif %}
                         <strong>{{ card.subject }}</strong><span aria-hidden="true"> · </span>{{ card.teacher }}<span aria-hidden="true"> · </span>{{ card.student_group }}
                         {% if card.planned_substitute %}
@@ -124,15 +124,15 @@
     </div>
 </div>
 {% else %}
-<div style="overflow-x: auto;">
-    <table class="table table-bordered align-middle">
+<div class="timetable-shell">
+    <table class="timetable-grid" aria-label="{{ page.current_view_label }} timetable">
         <thead>
         <tr>
-            <th>Day</th>
+            <th class="timetable-day-header">Day</th>
             {% for period in periods %}
-                <th {% if period.kind == "BREAK" %}style="background:#f2f2f2"{% endif %}>
-                    {{ period.name }}<br>
-                    <span class="small text-muted">{{ period.start_time|time:"H:i" }}-{{ period.end_time|time:"H:i" }}</span>
+                <th class="timetable-period-header {% if period.kind == 'BREAK' %}is-break{% endif %}">
+                    <span class="period-name">{{ period.name }}</span>
+                    <span class="period-time">{{ period.start_time|time:"H:i" }}-{{ period.end_time|time:"H:i" }}</span>
                 </th>
             {% endfor %}
         </tr>
@@ -140,23 +140,31 @@
         <tbody>
         {% for row in rows %}
             <tr>
-                <th>{{ row.day.value|title }}</th>
+                <th class="timetable-day">{{ row.day.value|title }}</th>
                 {% for cell in row.cells %}
-                    <td {% if cell.kind == "break" %}style="background:#f2f2f2; text-align:center"{% endif %}>
+                    <td class="timetable-cell {% if cell.kind == 'break' %}is-break{% elif cell.kind == 'empty' %}is-empty{% endif %}">
                         {% if cell.kind == "lesson" %}
                             {% if user.is_staff %}
-                                <a class="focused-lesson-link" href="{% url 'lesson-update' cell.lesson.id %}">
+                                <a class="lesson-card {{ cell.card.color_class }}" href="{{ cell.card.edit_url }}?next={{ request.get_full_path|urlencode }}" title="{{ cell.card.detail_title }}" aria-label="Edit {{ cell.card.subject }} lesson">
+                            {% else %}
+                                <div class="lesson-card {{ cell.card.color_class }}" title="{{ cell.card.detail_title }}">
                             {% endif %}
-                            <strong>{{ cell.lesson.subject_name }}</strong><br>
-                            <span class="small">{{ cell.lesson.teacher_name }} · {{ cell.lesson.student_group_name }} · {{ cell.lesson.room_name }}</span>
-                            {% if cell.lesson.planned_substitute_name %}
-                                <br><span class="small planned-substitute">Sub: {{ cell.lesson.planned_substitute_name }}</span>
-                            {% endif %}
+                                <span class="lesson-subject">{{ cell.card.subject }}</span>
+                                <span class="lesson-meta">
+                                    {% for detail in cell.card.details %}
+                                        <span class="lesson-detail" aria-label="{{ detail.label }}">{{ detail.value }}</span>
+                                    {% endfor %}
+                                </span>
+                                {% if cell.card.planned_substitute %}
+                                    <span class="planned-substitute">Sub: {{ cell.card.planned_substitute }}</span>
+                                {% endif %}
                             {% if user.is_staff %}
                                 </a>
+                            {% else %}
+                                </div>
                             {% endif %}
                         {% elif cell.kind == "break" %}
-                            <span class="text-muted">{{ cell.period.name }}</span>
+                            <span class="break-label">{{ cell.period.name }}</span>
                         {% endif %}
                     </td>
                 {% endfor %}
@@ -182,23 +190,61 @@
     .schedule-control { flex: 1 1 240px; max-width: 360px; }
     .schedule-back { margin-left: auto; }
     .schedule-prompt { margin: 4rem auto; text-align: center; }
-    .whole-school-scroll { overflow-x: auto; border: 1px solid #d7dce2; background: #fff; }
+    .whole-school-scroll, .timetable-shell { overflow: auto; border: 1px solid #d7dce2; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
     .whole-school-grid { min-width: max-content; --period-width: 145px; }
     .whole-school-header, .whole-school-row { display: grid; grid-template-columns: 90px repeat(var(--period-count), minmax(var(--period-width), 1fr)); min-width: 100%; }
     .whole-school-header { position: sticky; top: 0; z-index: 4; background: #fff; }
-    .whole-school-day-heading, .whole-school-period-heading { padding: 0.4rem 0.35rem; border-right: 1px solid #d7dce2; border-bottom: 1px solid #d7dce2; }
+    .whole-school-day-heading, .whole-school-period-heading { padding: 0.5rem 0.4rem; border-right: 1px solid #d7dce2; border-bottom: 1px solid #d7dce2; background: #fbfcfd; }
+    .whole-school-day-heading { position: sticky; left: 0; z-index: 5; }
     .whole-school-period-heading { text-align: center; font-size: 0.78rem; line-height: 1.15; }
     .whole-school-period-heading span { display: block; margin-top: 0.15rem; color: #666; font-size: 0.7rem; font-weight: normal; }
     .whole-school-row { grid-auto-rows: minmax(30px, auto); position: relative; border-bottom: 1px solid #d7dce2; }
     .whole-school-row:last-child { border-bottom: 0; }
-    .whole-school-day { grid-column: 1; grid-row: 1 / span var(--lane-count); z-index: 2; padding: 0.45rem; border-right: 1px solid #d7dce2; background: #fafafa; font-size: 0.8rem; font-weight: 700; }
+    .whole-school-day { grid-column: 1; grid-row: 1 / span var(--lane-count); position: sticky; left: 0; z-index: 3; padding: 0.55rem; border-right: 1px solid #d7dce2; background: #fbfcfd; font-size: 0.8rem; font-weight: 700; }
     .whole-school-slot { grid-row: 1 / span var(--lane-count); min-height: 30px; border-right: 1px solid #e3e6e9; background: #fff; }
     .whole-school-slot.is-break, .whole-school-period-heading.is-break { background: #f1f2f3; }
     .whole-school-slot span { display: block; padding: 0.35rem 0.2rem; color: #777; font-size: 0.68rem; text-align: center; }
-    .whole-school-lesson { z-index: 3; align-self: stretch; min-width: 0; margin: 2px; padding: 0.25rem 0.35rem; border-left: 3px solid #0b5cad; border-radius: 3px; background: #eaf3fc; color: #222; font-size: 0.75rem; line-height: 1.2; overflow-wrap: anywhere; }
-    a.whole-school-lesson:hover, .focused-lesson-link:hover { text-decoration: none; }
-    .focused-lesson-link { display: block; color: inherit; }
-    .planned-substitute { display: block; margin-top: 0.15rem; color: #4f5f2f; }
+    .whole-school-lesson { z-index: 3; align-self: stretch; min-width: 0; margin: 2px; padding: 0.3rem 0.4rem; border-left: 3px solid var(--subject-accent); border-radius: 4px; background: var(--subject-bg); color: #1f2933; font-size: 0.75rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; }
+    a.whole-school-lesson:hover, .lesson-card:hover { text-decoration: none; box-shadow: inset 0 0 0 1px var(--subject-accent); }
+    .timetable-grid { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0; table-layout: fixed; background: #fff; }
+    .timetable-grid th, .timetable-grid td { border-right: 1px solid #e5e8ec; border-bottom: 1px solid #e5e8ec; }
+    .timetable-grid tr:last-child th, .timetable-grid tr:last-child td { border-bottom: 0; }
+    .timetable-grid th:last-child, .timetable-grid td:last-child { border-right: 0; }
+    .timetable-day-header, .timetable-day { position: sticky; left: 0; width: 94px; z-index: 3; background: #fbfcfd; color: #3b4652; font-size: 0.78rem; font-weight: 700; text-align: left; }
+    .timetable-day-header { top: 0; z-index: 5; padding: 0.55rem; }
+    .timetable-day { padding: 0.65rem 0.55rem; vertical-align: top; }
+    .timetable-period-header { position: sticky; top: 0; z-index: 4; padding: 0.5rem 0.45rem; background: #fbfcfd; text-align: center; }
+    .timetable-period-header.is-break, .timetable-cell.is-break { background: #f3f5f7; }
+    .period-name, .period-time { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .period-name { color: #25313d; font-size: 0.78rem; font-weight: 700; line-height: 1.15; }
+    .period-time { margin-top: 0.15rem; color: #68727d; font-size: 0.7rem; font-weight: 500; }
+    .timetable-cell { height: 82px; padding: 0.35rem; vertical-align: top; background: #fff; }
+    .timetable-cell.is-empty { background: #fff; }
+    .break-label { display: flex; height: 100%; min-height: 44px; align-items: center; justify-content: center; color: #7a8490; font-size: 0.72rem; font-weight: 600; text-align: center; }
+    .lesson-card { display: flex; min-height: 66px; height: 100%; flex-direction: column; gap: 0.2rem; padding: 0.45rem 0.5rem; border-left: 4px solid var(--subject-accent); border-radius: 6px; background: var(--subject-bg); color: #18212b; overflow: hidden; }
+    .lesson-subject { display: block; font-size: 0.9rem; font-weight: 750; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lesson-meta { display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; color: #4f5b67; font-size: 0.74rem; line-height: 1.15; }
+    .lesson-detail { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lesson-detail + .lesson-detail::before { content: "•"; margin-right: 0.35rem; color: #89929d; }
+    .planned-substitute { display: block; margin-top: auto; color: #596428; font-size: 0.72rem; font-weight: 650; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .subject-color-0 { --subject-bg: #eaf3f2; --subject-accent: #3f7f7a; }
+    .subject-color-1 { --subject-bg: #f2eef8; --subject-accent: #7a65a8; }
+    .subject-color-2 { --subject-bg: #eef4fb; --subject-accent: #4f78a8; }
+    .subject-color-3 { --subject-bg: #f6f0e8; --subject-accent: #9a7446; }
+    .subject-color-4 { --subject-bg: #eef5ee; --subject-accent: #5f875a; }
+    .subject-color-5 { --subject-bg: #f7eeee; --subject-accent: #a65f5f; }
+    .subject-color-6 { --subject-bg: #eef1f7; --subject-accent: #65758f; }
+    .subject-color-7 { --subject-bg: #f5f3e8; --subject-accent: #8d8344; }
+    .subject-color-8 { --subject-bg: #edf5f8; --subject-accent: #4d8193; }
+    .subject-color-9 { --subject-bg: #f4eef3; --subject-accent: #935f83; }
+    @media (max-width: 720px) {
+        .d-flex.justify-content-between { align-items: flex-start; flex-direction: column; gap: 0.75rem; }
+        .schedule-actions { flex-wrap: wrap; }
+        .schedule-back { margin-left: 0; }
+        .timetable-grid { min-width: 760px; }
+        .timetable-cell { height: 76px; padding: 0.28rem; }
+        .lesson-card { min-height: 60px; padding: 0.4rem; }
+    }
 </style>
 <script>
         document.addEventListener("DOMContentLoaded", () => {
