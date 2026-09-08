@@ -125,6 +125,106 @@ def test_update_rejects_conflict_with_another_lesson(school_data):
 
 
 @pytest.mark.django_db
+def test_create_rejects_planned_substitute_who_is_already_teaching(school_data):
+    service().create_lesson(
+        command(
+            school_data,
+            teacher_id=school_data["other_teacher"].pk,
+            room_id=school_data["other_room"].pk,
+            student_group_id=school_data["other_group"].pk,
+        )
+    )
+
+    with pytest.raises(ScheduleConflictError):
+        service().create_lesson(
+            command(
+                school_data,
+                planned_substitute_id=school_data["other_teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_update_rejects_planned_substitute_who_is_already_teaching(school_data):
+    service().create_lesson(
+        command(
+            school_data,
+            teacher_id=school_data["other_teacher"].pk,
+            room_id=school_data["other_room"].pk,
+            student_group_id=school_data["other_group"].pk,
+        )
+    )
+    lesson = service().create_lesson(
+        command(
+            school_data,
+            start_period_id=school_data["periods"][1].pk,
+        )
+    )
+
+    with pytest.raises(ScheduleConflictError):
+        service().update_lesson(
+            command(
+                school_data,
+                id=lesson.id,
+                planned_substitute_id=school_data["other_teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_create_rejects_teacher_substituting_for_themselves(school_data):
+    with pytest.raises(ScheduleConflictError):
+        service().create_lesson(
+            command(
+                school_data,
+                planned_substitute_id=school_data["teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_create_rejects_planned_substitute_already_substituting(school_data):
+    service().create_lesson(
+        command(
+            school_data,
+            planned_substitute_id=school_data["other_teacher"].pk,
+        )
+    )
+    third_teacher = Teacher.objects.create(name="Katherine Johnson")
+
+    with pytest.raises(ScheduleConflictError):
+        service().create_lesson(
+            command(
+                school_data,
+                teacher_id=third_teacher.pk,
+                room_id=school_data["other_room"].pk,
+                student_group_id=school_data["other_group"].pk,
+                planned_substitute_id=school_data["other_teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_create_rejects_teacher_already_substituting(school_data):
+    service().create_lesson(
+        command(
+            school_data,
+            planned_substitute_id=school_data["other_teacher"].pk,
+        )
+    )
+
+    with pytest.raises(ScheduleConflictError):
+        service().create_lesson(
+            command(
+                school_data,
+                teacher_id=school_data["other_teacher"].pk,
+                room_id=school_data["other_room"].pk,
+                student_group_id=school_data["other_group"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
 def test_repository_lists_teachers_as_domain_models(school_data):
     teachers = DjangoLessonRepository().list_teachers()
 

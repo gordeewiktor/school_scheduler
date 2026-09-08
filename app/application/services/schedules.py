@@ -57,6 +57,7 @@ class ScheduleService:
             day=lesson.day,
             academic_year_id=period.academic_year_id,
             period_id=period.id,
+            planned_substitute_id=lesson.planned_substitute_id,
             lesson_id=lesson.id,
         )
 

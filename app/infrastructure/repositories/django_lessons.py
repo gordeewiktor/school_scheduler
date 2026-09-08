@@ -31,11 +31,18 @@ class DjangoLessonRepository:
         ]
 
     def list_potential_conflicts(self, request: LessonRequest) -> list[ExistingLesson]:
+        teacher_occupancy_query = Q(teacher_id=request.teacher_id) | Q(
+            planned_substitute_id=request.teacher_id
+        )
+        if request.planned_substitute_id is not None:
+            teacher_occupancy_query |= Q(teacher_id=request.planned_substitute_id) | Q(
+                planned_substitute_id=request.planned_substitute_id
+            )
         queryset = (
             Lesson.objects.select_related("start_period")
             .filter(day=request.day.value, start_period__academic_year_id=request.academic_year_id)
             .filter(
-                Q(teacher_id=request.teacher_id)
+                teacher_occupancy_query
                 | Q(room_id=request.room_id)
                 | Q(student_group_id=request.student_group_id)
             )
@@ -51,6 +58,7 @@ class DjangoLessonRepository:
                 day=Day(lesson.day),
                 academic_year_id=lesson.start_period.academic_year_id,
                 period_id=lesson.start_period_id,
+                planned_substitute_id=lesson.planned_substitute_id,
             )
             for lesson in queryset
         ]

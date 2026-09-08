@@ -12,6 +12,7 @@ class ExistingLesson:
     day: Day
     academic_year_id: int
     period_id: int
+    planned_substitute_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class LessonRequest:
     day: Day
     academic_year_id: int
     period_id: int
+    planned_substitute_id: int | None = None
     lesson_id: int | None = None
 
 
@@ -39,6 +41,15 @@ class LessonConflictPolicy:
         existing_lessons: list[ExistingLesson],
     ) -> list[LessonConflict]:
         conflicts: list[LessonConflict] = []
+        if request.planned_substitute_id is not None:
+            if request.planned_substitute_id == request.teacher_id:
+                conflicts.append(
+                    LessonConflict(
+                        "planned_substitute",
+                        "Teacher cannot substitute for themselves.",
+                        request.lesson_id or 0,
+                    )
+                )
         for lesson in existing_lessons:
             if request.lesson_id is not None and lesson.id == request.lesson_id:
                 continue
@@ -46,9 +57,31 @@ class LessonConflictPolicy:
                 continue
             if request.period_id != lesson.period_id:
                 continue
+            occupied_teacher_ids = {lesson.teacher_id}
+            if lesson.planned_substitute_id is not None:
+                occupied_teacher_ids.add(lesson.planned_substitute_id)
             if lesson.teacher_id == request.teacher_id:
                 conflicts.append(
                     LessonConflict("teacher", "Teacher is already teaching then.", lesson.id)
+                )
+            if lesson.planned_substitute_id == request.teacher_id:
+                conflicts.append(
+                    LessonConflict(
+                        "teacher",
+                        "Teacher is already substituting then.",
+                        lesson.id,
+                    )
+                )
+            if (
+                request.planned_substitute_id is not None
+                and request.planned_substitute_id in occupied_teacher_ids
+            ):
+                conflicts.append(
+                    LessonConflict(
+                        "planned_substitute",
+                        "Substitute teacher is already occupied then.",
+                        lesson.id,
+                    )
                 )
             if lesson.room_id == request.room_id:
                 conflicts.append(
