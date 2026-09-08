@@ -27,6 +27,11 @@ class SubstitutionService:
             academic_year_id, day, period_id
         )
         occupied_teacher_ids = {lesson.teacher_id for lesson in lessons}
+        occupied_teacher_ids.update(
+            lesson.planned_substitute_id
+            for lesson in lessons
+            if lesson.planned_substitute_id is not None
+        )
         return [
             teacher
             for teacher in teachers
@@ -36,37 +41,40 @@ class SubstitutionService:
     
     def _select_substitute(
         self,
-        teachers: list[Teacher],
+        teaching_free_teachers: list[Teacher],
+        substitutes_at_period: set[int],
         substitution_counts: dict[int, int],
     ) -> Teacher | None:
-        if not teachers:
+        preferred_teachers = [
+            teacher
+            for teacher in teaching_free_teachers
+            if teacher.id not in substitutes_at_period
+        ]
+        candidates = preferred_teachers or teaching_free_teachers
+        if not candidates:
             return None
 
         return min(
-            teachers,
+            candidates,
             key=lambda teacher: (
                 substitution_counts.get(teacher.id, 0),
                 teacher.id,
             ),
         )
 
-    def _eligible_teachers(
+    def _teaching_free_teachers(
         self,
         lesson: ScheduledLesson,
         teachers: list[Teacher],
         teaching_by_period: dict[tuple[Day, int], set[int]],
-        substitutes_by_period: dict[tuple[Day, int], set[int]],
     ) -> list[Teacher]:
         period_key = (lesson.day, lesson.start_period.id)
-        unavailable_teacher_ids = (
-            teaching_by_period.get(period_key, set())
-            | substitutes_by_period.get(period_key, set())
-        )
+        teaching_teacher_ids = teaching_by_period.get(period_key, set())
         return [
             teacher
             for teacher in teachers
             if teacher.id != lesson.teacher_id
-            and teacher.id not in unavailable_teacher_ids
+            and teacher.id not in teaching_teacher_ids
         ]
 
     def generate_planned_substitutions(
@@ -93,14 +101,14 @@ class SubstitutionService:
 
         for lesson in lessons:
             period_key = (lesson.day, lesson.start_period.id)
-            eligible = self._eligible_teachers(
+            teaching_free_teachers = self._teaching_free_teachers(
                 lesson,
                 teachers,
                 teaching_by_period,
-                substitutes_by_period,
             )
             substitute = self._select_substitute(
-                eligible,
+                teaching_free_teachers,
+                substitutes_by_period.get(period_key, set()),
                 substitution_counts,
             )
             substitute_id = substitute.id if substitute is not None else None
@@ -133,19 +141,28 @@ class SubstitutionService:
             teacher_id,
             academic_year_id,
         )
+        teachers = self.lesson_repository.list_teachers()
+        teaching_by_period: dict[tuple[Day, int], set[int]] = {}
+        for scheduled_lesson in self.lesson_repository.list_lessons(academic_year_id):
+            period_key = (scheduled_lesson.day, scheduled_lesson.start_period.id)
+            teaching_by_period.setdefault(period_key, set()).add(
+                scheduled_lesson.teacher_id
+            )
         plan: list[SubstitutionAssignment] = []
         substitution_counts: dict[int, int] = {}
+        substitutes_by_period: dict[tuple[Day, int], set[int]] = {}
 
         for lesson in lessons:
-            available = self.available_teachers(
-                academic_year_id,
-                lesson.day,
-                lesson.start_period.id,
-                excluded_teacher_id=teacher_id,
+            period_key = (lesson.day, lesson.start_period.id)
+            teaching_free_teachers = self._teaching_free_teachers(
+                lesson,
+                teachers,
+                teaching_by_period,
             )
 
             substitute = self._select_substitute(
-                available,
+                teaching_free_teachers,
+                substitutes_by_period.get(period_key, set()),
                 substitution_counts,
             )
 
@@ -157,6 +174,7 @@ class SubstitutionService:
             )
 
             if substitute is not None:
+                substitutes_by_period.setdefault(period_key, set()).add(substitute.id)
                 substitution_counts[substitute.id] = (
                     substitution_counts.get(substitute.id, 0) + 1
                 )

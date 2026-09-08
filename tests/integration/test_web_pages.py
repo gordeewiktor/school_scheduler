@@ -365,6 +365,39 @@ def test_generate_planned_substitutions_updates_timetable(
 
 
 @pytest.mark.django_db
+def test_generate_planned_substitutions_persists_teaching_free_fallback(
+    authenticated_client, lesson_form_data
+):
+    substitute = Teacher.objects.create(name="Grace")
+    second_teacher = Teacher.objects.create(name="Katherine")
+    Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+    Lesson.objects.create(
+        teacher=second_teacher,
+        subject=lesson_form_data["subject"],
+        room=Room.objects.create(name="Fallback room"),
+        student_group=StudentGroup.objects.create(name="Fallback group"),
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+
+    authenticated_client.post(
+        reverse("generate-planned-substitutions"),
+        {"academic_year": lesson_form_data["start_period"].academic_year_id},
+    )
+
+    assert list(
+        Lesson.objects.order_by("id").values_list("planned_substitute_id", flat=True)
+    ) == [substitute.pk, substitute.pk]
+
+
+@pytest.mark.django_db
 def test_lesson_edit_form_displays_current_substitution_teacher(
     authenticated_client, lesson_form_data
 ):

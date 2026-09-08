@@ -24,6 +24,7 @@ def scheduled(
     teacher_id=1,
     room_id=1,
     group_id=1,
+    planned_substitute_id=None,
 ):
     return ScheduledLesson(
         id=lesson_id,
@@ -36,6 +37,12 @@ def scheduled(
         student_group_name=f"Group {group_id}",
         day=day,
         start_period=make_period(order),
+        planned_substitute_id=planned_substitute_id,
+        planned_substitute_name=(
+            f"Teacher {planned_substitute_id}"
+            if planned_substitute_id is not None
+            else ""
+        ),
     )
 
 
@@ -134,6 +141,30 @@ def test_available_teachers_excludes_absent_teacher():
     assert [teacher.id for teacher in result] == [2]
 
 
+def test_available_teachers_excludes_teachers_already_substituting_that_period():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Grace"),
+        Teacher(id=3, name="Katherine"),
+    ]
+    lessons = [
+        scheduled(
+            1,
+            teacher_id=1,
+            day=Day.MONDAY,
+            order=1,
+            planned_substitute_id=2,
+        ),
+    ]
+
+    repository = FakeLessonRepository(lessons=lessons, teachers=teachers)
+    service = SubstitutionService(repository)
+
+    result = service.available_teachers(1, Day.MONDAY, 1)
+
+    assert [teacher.id for teacher in result] == [3]
+
+
 def test_generate_plan_breaks_ties_by_teacher_id():
     teachers = [
         Teacher(id=3, name="Katherine"),
@@ -193,6 +224,27 @@ def test_generate_plan_updates_counts_as_generation_progresses():
     assert [assignment.substitute.id for assignment in plan] == [2, 3]
 
 
+def test_generate_plan_falls_back_to_a_teaching_free_substitute_already_at_slot():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Grace"),
+    ]
+    lessons = [
+        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
+        scheduled(2, teacher_id=1, day=Day.MONDAY, order=1, room_id=2, group_id=2),
+    ]
+
+    repository = FakeLessonRepository(lessons=lessons, teachers=teachers)
+    service = SubstitutionService(repository)
+
+    plan = service.generate_plan(teacher_id=1, academic_year_id=1)
+
+    assert [
+        assignment.substitute.id if assignment.substitute is not None else None
+        for assignment in plan
+    ] == [2, 2]
+
+
 def test_generate_planned_substitutions_excludes_regular_teacher():
     teachers = [
         Teacher(id=1, name="Ada"),
@@ -226,8 +278,40 @@ def test_generate_planned_substitutions_excludes_teachers_teaching_that_period()
     assert [
         assignment.substitute.id if assignment.substitute is not None else None
         for assignment in plan
-    ] == [3, None]
-    assert repository.planned_substitutes == {1: 3, 2: None}
+    ] == [3, 3]
+    assert repository.planned_substitutes == {1: 3, 2: 3}
+
+
+def test_fallback_selects_least_assigned_teaching_free_teacher():
+    teachers = [
+        Teacher(id=2, name="Grace"),
+        Teacher(id=3, name="Katherine"),
+    ]
+    service = SubstitutionService(FakeLessonRepository(teachers=teachers))
+
+    substitute = service._select_substitute(
+        teachers,
+        substitutes_at_period={2, 3},
+        substitution_counts={2: 4, 3: 1},
+    )
+
+    assert substitute.id == 3
+
+
+def test_fallback_breaks_ties_by_teacher_id():
+    teachers = [
+        Teacher(id=3, name="Katherine"),
+        Teacher(id=2, name="Grace"),
+    ]
+    service = SubstitutionService(FakeLessonRepository(teachers=teachers))
+
+    substitute = service._select_substitute(
+        teachers,
+        substitutes_at_period={2, 3},
+        substitution_counts={2: 1, 3: 1},
+    )
+
+    assert substitute.id == 2
 
 
 def test_generate_planned_substitutions_excludes_substitutes_already_assigned_that_period():
@@ -299,6 +383,23 @@ def test_generate_planned_substitutions_leaves_lesson_empty_when_no_substitute_a
     assert repository.planned_substitutes == {1: None}
 
 
+def test_generate_planned_substitutions_leaves_lesson_empty_when_every_teacher_teaches():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Grace"),
+    ]
+    lessons = [
+        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
+        scheduled(2, teacher_id=2, day=Day.MONDAY, order=1),
+    ]
+
+    repository = FakeLessonRepository(lessons=lessons, teachers=teachers)
+    plan = SubstitutionService(repository).generate_planned_substitutions(1)
+
+    assert [assignment.substitute for assignment in plan] == [None, None]
+    assert repository.planned_substitutes == {1: None, 2: None}
+
+
 def test_generate_planned_substitutions_updates_counts_as_generation_progresses():
     teachers = [
         Teacher(id=1, name="Ada"),
@@ -317,4 +418,4 @@ def test_generate_planned_substitutions_updates_counts_as_generation_progresses(
     assert [
         assignment.substitute.id if assignment.substitute is not None else None
         for assignment in plan
-    ] == [2, None, 3]
+    ] == [2, 2, 3]
