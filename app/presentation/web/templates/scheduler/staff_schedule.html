@@ -1,0 +1,137 @@
+{% extends "scheduler/base.html" %}
+
+{% block title %}Staff Schedule{% endblock %}
+
+{% block content %}
+<div class="staff-schedule-heading">
+    <div>
+        <h1 class="h2">Staff Schedule</h1>
+        <p class="text-muted">See what every teacher is doing in each period.</p>
+    </div>
+</div>
+
+<form class="staff-schedule-controls mb-4" method="get">
+    <div>
+        <label class="form-label" for="staff-schedule-academic-year">Academic Year</label>
+        <select id="staff-schedule-academic-year" class="form-select" name="academic_year" onchange="this.form.submit()">
+            {% for year in academic_years %}
+                <option value="{{ year.pk }}" {% if selected_academic_year == year.pk|stringformat:"s" %}selected{% endif %}>{{ year }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</form>
+
+{% if staff_schedule %}
+<div class="staff-schedule-scroll">
+    <table class="staff-schedule-grid" aria-label="Staff schedule by day and period">
+        <thead>
+            <tr>
+                <th>Day</th>
+                {% for period in staff_schedule.periods %}
+                    <th class="{% if period.kind.value == 'BREAK' %}is-break{% endif %}">
+                        {{ period.name }}<span>{{ period.start_time|time:"H:i" }}–{{ period.end_time|time:"H:i" }}</span>
+                    </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in staff_schedule.rows %}
+                <tr>
+                    <th>{{ row.day.value|title }}</th>
+                    {% for slot in row.slots %}
+                        <td class="{% if slot.is_break %}is-break{% endif %}">
+                            {% if slot.is_break %}
+                                <span class="staff-break">Break</span>
+                            {% else %}
+                                <a class="staff-slot-link" href="?academic_year={{ selected_academic_year }}&day={{ slot.day.value }}&period={{ slot.period.id }}">
+                                    <strong>{{ slot.teaching|length }} teaching</strong>
+                                    <span>{{ slot.substitutions|length }} substitutions · {{ slot.free_teachers|length }} free</span>
+                                </a>
+                            {% endif %}
+                        </td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if selected_slot %}
+<section class="staff-slot-detail" aria-labelledby="staff-slot-title">
+    <h2 id="staff-slot-title" class="h3">{{ selected_slot.day.value|title }} · {{ selected_slot.period.name }} · {{ selected_slot.period.start_time|time:"H:i" }}–{{ selected_slot.period.end_time|time:"H:i" }}</h2>
+    <p class="text-muted">{{ selected_slot.teaching|length }} teaching · {{ selected_slot.substitutions|length }} substitutions · {{ selected_slot.free_teachers|length }} free</p>
+
+    <div class="staff-detail-columns">
+        <section>
+            <h3 class="h4">Teaching</h3>
+            <ul class="staff-assignment-list">
+                {% for assignment in selected_slot.teaching %}
+                    <li><strong>{{ assignment.teacher_name }}</strong> — {{ assignment.subject_name }} — {{ assignment.student_group_name }} — {{ assignment.room_name }}</li>
+                {% empty %}
+                    <li class="text-muted">No regular lessons.</li>
+                {% endfor %}
+            </ul>
+        </section>
+        <section>
+            <h3 class="h4">Substituting</h3>
+            <ul class="staff-assignment-list">
+                {% for assignment in selected_slot.substitutions %}
+                    <li class="{% if assignment.has_substitution_conflict %}staff-substitution-conflict{% endif %}"><strong>{{ assignment.teacher_name }}</strong> — {{ assignment.subject_name }} — {{ assignment.student_group_name }} — {{ assignment.room_name }} — covering {{ assignment.regular_teacher_name }}</li>
+                {% empty %}
+                    <li class="text-muted">No planned substitutions.</li>
+                {% endfor %}
+            </ul>
+        </section>
+        <section>
+            <h3 class="h4">Free teachers</h3>
+            <ul class="staff-free-list">
+                {% for teacher in selected_slot.free_teachers %}
+                    <li>{{ teacher.name }}</li>
+                {% empty %}
+                    <li class="text-muted">No teachers are free.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </div>
+
+    {% if selected_slot.unassigned_substitutions %}
+        <section class="staff-unassigned">
+            <h3 class="h4">Unassigned substitutions</h3>
+            <ul class="staff-assignment-list">
+                {% for assignment in selected_slot.unassigned_substitutions %}
+                    <li>{{ assignment.subject_name }} — {{ assignment.student_group_name }} — {{ assignment.teacher_name }} — {{ assignment.room_name }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+    {% endif %}
+</section>
+{% endif %}
+{% else %}
+<p class="text-muted">Create an academic year and periods to display the staff schedule.</p>
+{% endif %}
+
+<style>
+    .staff-schedule-heading { margin-bottom: 1rem; }
+    .staff-schedule-heading p { margin: 0.25rem 0 0; }
+    .staff-schedule-controls { max-width: 340px; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
+    .staff-schedule-scroll { overflow-x: auto; border: 1px solid #ddd; background: #fff; }
+    .staff-schedule-grid { width: 100%; min-width: 880px; border-collapse: collapse; }
+    .staff-schedule-grid th, .staff-schedule-grid td { border: 1px solid #e1e1e1; padding: 0; vertical-align: middle; }
+    .staff-schedule-grid th { padding: 0.55rem; background: #f5f6f8; text-align: left; white-space: nowrap; }
+    .staff-schedule-grid thead th span { display: block; color: #666; font-size: 0.78rem; font-weight: 400; }
+    .staff-slot-link { display: flex; min-height: 3.35rem; padding: 0.4rem 0.5rem; flex-direction: column; gap: 0.2rem; color: #222; }
+    .staff-slot-link:hover { background: #eef6ff; text-decoration: none; }
+    .staff-slot-link strong { font-size: 0.82rem; }
+    .staff-slot-link span, .staff-break { color: #666; font-size: 0.75rem; line-height: 1.2; }
+    .staff-schedule-grid .is-break { background: #f1f1f1; }
+    .staff-break { display: block; padding: 0.5rem; text-align: center; }
+    .staff-slot-detail { margin-top: 1.5rem; padding: 1rem; border: 1px solid #cfd8e3; border-radius: 6px; background: #fff; }
+    .staff-slot-detail > p { margin-top: -0.5rem; }
+    .staff-detail-columns { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 1rem; }
+    .staff-assignment-list, .staff-free-list { margin: 0; padding-left: 1.2rem; }
+    .staff-assignment-list li, .staff-free-list li { margin: 0.35rem 0; }
+    .staff-substitution-conflict { color: #b42318; font-weight: 600; }
+    .staff-unassigned { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e1e1e1; }
+    @media (max-width: 760px) { .staff-detail-columns { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}

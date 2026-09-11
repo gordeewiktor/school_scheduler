@@ -625,6 +625,47 @@ class GeneratePlannedSubstitutionsView(AdministratorRequiredMixin, View):
         return redirect(next_url)
 
 
+class StaffScheduleView(AdministratorRequiredMixin, TemplateView):
+    template_name = "scheduler/staff_schedule.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        academic_years = AcademicYear.objects.all()
+        academic_year_id = self.request.GET.get("academic_year", "")
+        academic_year = (
+            academic_years.filter(pk=int(academic_year_id)).first()
+            if academic_year_id.isdigit()
+            else academic_years.first()
+        )
+        staff_schedule = None
+        selected_slot = None
+        if academic_year is not None:
+            staff_schedule = build_schedule_service().staff_schedule(academic_year.pk)
+            selected_day = self.request.GET.get("day", "")
+            selected_period_id = self.request.GET.get("period", "")
+            if selected_period_id.isdigit():
+                selected_slot = next(
+                    (
+                        slot
+                        for row in staff_schedule.rows
+                        if row.day.value == selected_day
+                        for slot in row.slots
+                        if slot.period.id == int(selected_period_id) and not slot.is_break
+                    ),
+                    None,
+                )
+
+        context.update(
+            {
+                "academic_years": academic_years,
+                "selected_academic_year": str(academic_year.pk) if academic_year else "",
+                "staff_schedule": staff_schedule,
+                "selected_slot": selected_slot,
+            }
+        )
+        return context
+
+
 class TeacherSubstitutionView(AdministratorRequiredMixin, TemplateView):
     template_name = "scheduler/teacher_substitution.html"
 

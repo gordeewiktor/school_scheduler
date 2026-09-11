@@ -21,6 +21,43 @@ class TimetableRow:
     cells: list[TimetableCell]
 
 
+@dataclass(frozen=True, slots=True)
+class StaffScheduleAssignment:
+    teacher_id: int
+    teacher_name: str
+    subject_name: str
+    student_group_name: str
+    room_name: str
+    regular_teacher_name: str = ""
+    has_substitution_conflict: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class StaffScheduleSlot:
+    day: Day
+    period: Period
+    teaching: tuple[StaffScheduleAssignment, ...]
+    substitutions: tuple[StaffScheduleAssignment, ...]
+    free_teachers: tuple[Teacher, ...]
+    unassigned_substitutions: tuple[StaffScheduleAssignment, ...]
+
+    @property
+    def is_break(self) -> bool:
+        return self.period.kind == PeriodKind.BREAK
+
+
+@dataclass(frozen=True, slots=True)
+class StaffScheduleRow:
+    day: Day
+    slots: tuple[StaffScheduleSlot, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class StaffSchedule:
+    periods: tuple[Period, ...]
+    rows: tuple[StaffScheduleRow, ...]
+
+
 class ScheduleService:
     DAY_ORDER = list(Day)
 
@@ -157,4 +194,116 @@ class ScheduleService:
             self.lesson_repository.list_lessons_for_student_group(
                 student_group_id, academic_year_id
             )
+        )
+
+    def staff_schedule(self, academic_year_id: int) -> StaffSchedule:
+        periods = self.periods(academic_year_id)
+        teachers = sorted(
+            self.lesson_repository.list_teachers(),
+            key=lambda teacher: (teacher.name.casefold(), teacher.id),
+        )
+        lessons_by_slot: dict[tuple[Day, int], list[ScheduledLesson]] = {}
+        for lesson in self.lesson_repository.list_lessons(academic_year_id):
+            lessons_by_slot.setdefault((lesson.day, lesson.start_period.id), []).append(
+                lesson
+            )
+
+        return StaffSchedule(
+            periods=tuple(periods),
+            rows=tuple(
+                StaffScheduleRow(
+                    day=day,
+                    slots=tuple(
+                        self._staff_schedule_slot(
+                            day,
+                            period,
+                            lessons_by_slot.get((day, period.id), []),
+                            teachers,
+                        )
+                        for period in periods
+                    ),
+                )
+                for day in self.DAY_ORDER
+            ),
+        )
+
+    @staticmethod
+    def _staff_schedule_slot(
+        day: Day,
+        period: Period,
+        lessons: list[ScheduledLesson],
+        teachers: list[Teacher],
+    ) -> StaffScheduleSlot:
+        teaching_teacher_ids = {lesson.teacher_id for lesson in lessons}
+        substitution_teacher_ids = [
+            lesson.planned_substitute_id
+            for lesson in lessons
+            if lesson.planned_substitute_id is not None
+        ]
+        substitution_counts = {
+            teacher_id: substitution_teacher_ids.count(teacher_id)
+            for teacher_id in substitution_teacher_ids
+        }
+        teaching = tuple(
+            sorted(
+                (
+                    StaffScheduleAssignment(
+                        teacher_id=lesson.teacher_id,
+                        teacher_name=lesson.teacher_name,
+                        subject_name=lesson.subject_name,
+                        student_group_name=lesson.student_group_name,
+                        room_name=lesson.room_name,
+                    )
+                    for lesson in lessons
+                ),
+                key=lambda assignment: (assignment.teacher_name.casefold(), assignment.teacher_id),
+            )
+        )
+        substitutions = tuple(
+            sorted(
+                (
+                    StaffScheduleAssignment(
+                        teacher_id=lesson.planned_substitute_id,
+                        teacher_name=lesson.planned_substitute_name,
+                        subject_name=lesson.subject_name,
+                        student_group_name=lesson.student_group_name,
+                        room_name=lesson.room_name,
+                        regular_teacher_name=lesson.teacher_name,
+                        has_substitution_conflict=(
+                            substitution_counts[lesson.planned_substitute_id] > 1
+                        ),
+                    )
+                    for lesson in lessons
+                    if lesson.planned_substitute_id is not None
+                ),
+                key=lambda assignment: (assignment.teacher_name.casefold(), assignment.teacher_id),
+            )
+        )
+        unassigned_substitutions = tuple(
+            sorted(
+                (
+                    StaffScheduleAssignment(
+                        teacher_id=lesson.teacher_id,
+                        teacher_name=lesson.teacher_name,
+                        subject_name=lesson.subject_name,
+                        student_group_name=lesson.student_group_name,
+                        room_name=lesson.room_name,
+                    )
+                    for lesson in lessons
+                    if lesson.planned_substitute_id is None
+                ),
+                key=lambda assignment: (assignment.teacher_name.casefold(), assignment.teacher_id),
+            )
+        )
+        occupied_teacher_ids = teaching_teacher_ids | set(substitution_teacher_ids)
+        free_teachers = tuple(
+            teacher for teacher in teachers if teacher.id not in occupied_teacher_ids
+        )
+        return StaffScheduleSlot(
+            day=day,
+            period=period,
+            teaching=teaching,
+            substitutions=substitutions,
+            free_teachers=free_teachers,
+            unassigned_substitutions=unassigned_substitutions,
         )

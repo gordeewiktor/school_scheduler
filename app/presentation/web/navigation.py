@@ -11,7 +11,7 @@ class NavigationItem:
 class NavigationBuilder:
     ADMINISTRATOR_ITEMS = (
         NavigationItem("Timetable", "schedule"),
-        NavigationItem("Lessons", "lesson-list"),
+        NavigationItem("Staff Schedule", "staff-schedule"),
         NavigationItem("Admin", "admin:index"),
     )
     PUBLIC_ITEMS = (
