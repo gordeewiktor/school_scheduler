@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -6,6 +7,41 @@ from app.domain.models import Day as DomainDay
 from app.domain.models import Lesson as DomainLesson
 from app.domain.models import Period as DomainPeriod
 from app.domain.models import PeriodKind as DomainPeriodKind
+
+
+class School(models.Model):
+    name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "app"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class SchoolMembership(models.Model):
+    class Role(models.TextChoices):
+        PRINCIPAL = "PRINCIPAL", "Principal"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="school_memberships"
+    )
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.PRINCIPAL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "app"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "school"], name="unique_user_school_membership"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} @ {self.school} ({self.role})"
 
 
 class AcademicYear(models.Model):

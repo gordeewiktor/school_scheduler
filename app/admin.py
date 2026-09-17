@@ -4,10 +4,28 @@ from app.infrastructure.database.models import (
     AcademicYear,
     Period,
     Room,
+    School,
+    SchoolMembership,
     StudentGroup,
     Subject,
     Teacher,
 )
+
+
+@admin.register(School)
+class SchoolAdmin(admin.ModelAdmin):
+    list_display = ["name", "created_at"]
+    search_fields = ["name"]
+    ordering = ["name"]
+
+
+@admin.register(SchoolMembership)
+class SchoolMembershipAdmin(admin.ModelAdmin):
+    list_display = ["user", "school", "role", "created_at"]
+    list_filter = ["role", "school"]
+    search_fields = ["user__username", "school__name"]
+    list_select_related = ["user", "school"]
+    ordering = ["school", "user"]
 
 
 @admin.register(AcademicYear)
