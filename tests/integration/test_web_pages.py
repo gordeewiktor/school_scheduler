@@ -27,6 +27,10 @@ def authenticated_client(client):
         user=user, school=school, role=SchoolMembership.Role.PRINCIPAL
     )
     client.force_login(user)
+    # Exposed so dependent fixtures (e.g. lesson_form_data) and tests can
+    # create objects that belong to this client's current school, rather
+    # than an unrelated one that Phase 4B's scoping would then hide.
+    client.school = school
     return client
 
 
@@ -40,8 +44,8 @@ def regular_client(client):
 
 
 @pytest.fixture
-def lesson_form_data(db):
-    school = School.objects.create(name="Test School")
+def lesson_form_data(authenticated_client):
+    school = authenticated_client.school
     year = AcademicYear.objects.create(school=school, name="2026")
     first = Period.objects.create(
         academic_year=year, name="Period 1", order=1,
@@ -90,8 +94,7 @@ def test_schedule_home_is_public(client):
 
 @pytest.mark.django_db
 def test_create_period_from_time_input(authenticated_client):
-    school = School.objects.create(name="Test School")
-    year = AcademicYear.objects.create(school=school, name="2026")
+    year = AcademicYear.objects.create(school=authenticated_client.school, name="2026")
     response = authenticated_client.post(
         reverse("period-create"),
         {
@@ -109,8 +112,7 @@ def test_create_period_from_time_input(authenticated_client):
 
 @pytest.mark.django_db
 def test_invalid_period_time_returns_form_errors(authenticated_client):
-    school = School.objects.create(name="Test School")
-    year = AcademicYear.objects.create(school=school, name="2026")
+    year = AcademicYear.objects.create(school=authenticated_client.school, name="2026")
     response = authenticated_client.post(
         reverse("period-create"),
         {
@@ -128,41 +130,38 @@ def test_invalid_period_time_returns_form_errors(authenticated_client):
 
 
 @pytest.mark.django_db
-def test_create_academic_year_requires_a_school(authenticated_client):
-    response = authenticated_client.post(
-        reverse("academic-year-create"),
-        {"name": "2026", "default_period_duration": 45},
-    )
+def test_create_academic_year_has_no_school_field(authenticated_client):
+    response = authenticated_client.get(reverse("academic-year-create"))
 
     assert response.status_code == 200
-    assert response.context["form"].errors["school"] == ["This field is required."]
-    assert not AcademicYear.objects.exists()
+    assert "school" not in response.context["form"].fields
 
 
 @pytest.mark.django_db
-def test_create_academic_year_with_school_succeeds(authenticated_client):
-    school = School.objects.create(name="Test School")
+def test_create_academic_year_assigns_current_school(authenticated_client):
+    other_school = School.objects.create(name="Someone Else's School")
 
     response = authenticated_client.post(
         reverse("academic-year-create"),
-        {"school": school.pk, "name": "2026", "default_period_duration": 45},
+        # A `school` id is posted anyway to prove it's ignored, not trusted.
+        {"school": other_school.pk, "name": "2026", "default_period_duration": 45},
     )
 
     assert response.status_code == 302
     year = AcademicYear.objects.get()
-    assert year.school == school
+    assert year.school == authenticated_client.school
+    assert year.school != other_school
     assert year.name == "2026"
 
 
 @pytest.mark.django_db
 def test_academic_year_list_shows_school_column(authenticated_client):
-    school = School.objects.create(name="Test School")
-    AcademicYear.objects.create(school=school, name="2026")
+    AcademicYear.objects.create(school=authenticated_client.school, name="2026")
 
     response = authenticated_client.get(reverse("academic-year-list"))
 
     assert response.status_code == 200
-    assert b"Test School" in response.content
+    assert authenticated_client.school.name.encode() in response.content
 
 
 @pytest.mark.django_db
@@ -199,8 +198,14 @@ def test_lesson_form_rejects_room_from_another_school(authenticated_client, less
 
     response = authenticated_client.post(reverse("lesson-create"), data)
 
+    # Phase 4B scopes LessonForm.room to the current school, so a
+    # foreign room is now rejected as an invalid choice on the `room`
+    # field itself — earlier (before this scoping existed) it would
+    # have reached Phase 3's CrossSchoolLessonError as a non-field
+    # error instead. Phase 3's guard is unchanged; it's just no longer
+    # what catches this particular case.
     assert response.status_code == 200
-    assert response.context["form"].non_field_errors()
+    assert response.context["form"].errors["room"]
     assert not Lesson.objects.exists()
 
 

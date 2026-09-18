@@ -469,6 +469,12 @@ school ID.
 The current school should be determined from the authenticated user's
 Principal/membership.
 
+**Phase 4B implemented this for all CRUD operations** on Teacher, Room,
+Subject, StudentGroup, AcademicYear, Period, and Lesson — see §14 for
+the mechanism. `ScheduleView`, `StaffScheduleView`,
+`TeacherSubstitutionView`, and `GeneratePlannedSubstitutionsView`
+remain unscoped; that is Phase 4C.
+
 ---
 
 # 14. IDOR / Object Access Security
@@ -507,6 +513,74 @@ This applies to:
 - repositories;
 - services;
 - forms.
+
+**Phase 4B implementation** (`app/presentation/web/views.py`,
+`app/presentation/web/forms.py`): CRUD isolation for Teacher, Room,
+Subject, StudentGroup, AcademicYear, Period, and Lesson is done and
+tested. The scheduling-subsystem views (`ScheduleView`,
+`StaffScheduleView`, `TeacherSubstitutionView`,
+`GeneratePlannedSubstitutionsView`) and `DjangoLessonRepository`/
+`ScheduleService`/`SubstitutionService` beyond what Phase 3 already
+added are untouched — that is Phase 4C.
+
+- **List isolation** — `SchoolScopedQuerysetMixin`, a small mixin with
+  one `school_filter_lookup` class attribute (default `"school"`,
+  overridden to `"academic_year__school"` for Period or
+  `"start_period__academic_year__school"` for Lesson) and one
+  `get_queryset()` method that filters by
+  `self.current_school`. Applied to `SchedulerListView`,
+  `SchedulerUpdateView`, and `SchedulerDeleteView` — the three shared
+  bases behind every Teacher/Room/Subject/StudentGroup/AcademicYear/
+  Period/Lesson CRUD view.
+- **Update/Delete IDOR protection** — the same mixin, for free: Django's
+  `SingleObjectMixin.get_object()` builds itself from `get_queryset()`,
+  so a pk belonging to another school simply isn't in the filtered
+  queryset and 404s instead of being returned, edited, or deleted.
+- **Create school assignment** — `school` was removed entirely from
+  `TeacherForm`/`RoomForm`/`SubjectForm`/`StudentGroupForm`/
+  `AcademicYearForm`'s `Meta.fields` (it is never a client-choosable
+  field for these five models). `SchedulerCreateView` gained an
+  `assign_current_school` flag (`True` on those five Create views only)
+  and a `get_form()` override that sets `form.instance.school =
+  self.current_school` — deliberately in `get_form()`, not
+  `form_valid()`, because `ModelForm.validate_unique()` runs during
+  `form.is_valid()`, before `form_valid()` is ever called.
+- **A real bug this caught**: removing `school` from `Meta.fields` makes
+  Django's own `_get_validation_exclusions()` exclude `school` from
+  `validate_unique()` entirely (Django excludes any field not present
+  on the form), which silently skips the per-school
+  `UniqueConstraint(school, name)` check and lets a duplicate name
+  reach the database as a raw `IntegrityError` instead of a form error.
+  Fixed with a small, targeted override of
+  `_get_validation_exclusions()` on `BaseStyledModelForm`: if `school`
+  would be excluded but the instance already has one set (i.e. the view
+  assigned it), keep it in the check. Caught by
+  `test_create_enforces_per_school_name_uniqueness` during
+  implementation, not discovered later.
+- **Form queryset isolation** — `BaseStyledModelForm.__init__` now
+  accepts (and, for forms that don't need it, silently ignores) a
+  `school=None` keyword. `SchedulerCreateView`/`SchedulerUpdateView`
+  both inject `school=self.current_school` via `get_form_kwargs()`
+  unconditionally; only `PeriodForm` (its `academic_year` field) and
+  `LessonForm` (`teacher`, `planned_substitute`, `subject`, `room`,
+  `student_group`, `start_period`) actually use it, scoping every one
+  of those `ModelChoiceField`s to `Model.objects.filter(school=school)`
+  (or `academic_year__school=school` for `start_period`). Choosing
+  `.filter(school=school)` rather than a `.objects.all()` fallback
+  means a missing/forgotten `school` — a bug, not a normal path — fails
+  *closed* (zero choices) rather than reopening the vulnerability.
+- **Lesson vs. Phase 3**: Phase 3's `CrossSchoolLessonError` guard (are
+  a Lesson's own resources mutually consistent with each other?) is
+  unmodified and still tested by
+  `tests/integration/test_lesson_school_integrity.py`. Phase 4B adds a
+  different, narrower question — are they consistent with *my* current
+  school? — enforced at the form level. In practice, once `LessonForm`'s
+  fields are scoped, `cleaned_data` can only ever contain
+  `current_school` resources, so Phase 3's guard is no longer the thing
+  that catches a foreign id in the normal CRUD flow (Django's
+  `ModelChoiceField` rejects it first, as a field-level "select a valid
+  choice" error) — it remains a defense-in-depth safety net for any
+  future caller that bypasses the form.
 
 ---
 
@@ -1084,20 +1158,22 @@ the no-school-access page, and `SchoolAccessRequiredMixin` replacing
 -protected view. No database migration was needed — `SchoolMembership`
 already had everything Phase 4A required.
 
-Phase 4A deliberately stops at authorization/current-school resolution.
-It does **not** scope any queryset, form choice, or object lookup by
-school yet — every list view, form dropdown, and object-detail
-Update/Delete view is still effectively global once a user has *any*
-resolvable current school (the IDOR/cross-school-disclosure findings
-from the Phase 4 inspection are all still open).
+**Phase 4B (CRUD school data isolation) is implemented** (see §14):
+list-view queryset scoping, Update/Delete IDOR protection, server-side
+`school` assignment on Create (removed from the five direct-owner
+forms' `Meta.fields`), and `ModelChoiceField` scoping for `PeriodForm`
+and `LessonForm`, for all seven CRUD resources (Teacher, Room, Subject,
+StudentGroup, AcademicYear, Period, Lesson). No migration was needed.
+
+Phase 4B deliberately stops at the plain-CRUD views. `ScheduleView`,
+`StaffScheduleView`, `TeacherSubstitutionView`/`TeacherSubstitutionForm`,
+and `GeneratePlannedSubstitutionsView` are untouched and remain fully
+unscoped — a user can still view or act on another school's timetable/
+substitution data through those pages by manipulating query parameters.
+`DjangoLessonRepository`/`ScheduleService`/`SubstitutionService`/
+`ConflictService` were not changed beyond what Phase 3 already added.
 
 The next implementation steps are:
-
-    Phase 4B: scope the plain-CRUD views (Teacher/Room/Subject/
-    StudentGroup/AcademicYear/Period/Lesson) — list-view querysets,
-    Update/Delete get_queryset() (closes the IDOR gap), and
-    force-assigning `school` server-side on Create instead of exposing
-    it as a form field.
 
     Phase 4C: thread current-school context through the Lesson/
     ScheduleService/SubstitutionService/ConflictService/

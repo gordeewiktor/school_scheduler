@@ -48,6 +48,30 @@ from app.presentation.web.school_access import (
 )
 
 
+class SchoolScopedQuerysetMixin:
+    """Restricts a generic view's queryset to rows belonging to
+    `self.current_school` (set by SchoolAccessRequiredMixin).
+
+    Used by SchedulerListView (so list pages only show the current
+    school's rows) and by SchedulerUpdateView/SchedulerDeleteView,
+    where it doubles as IDOR protection: Django's SingleObjectMixin
+    builds get_object() from get_queryset(), so a pk belonging to
+    another school simply isn't in the queryset and 404s instead of
+    being returned or edited.
+
+    `school_filter_lookup` is the ORM lookup path from the model to
+    School — "school" for models with a direct FK, or a dotted lookup
+    such as "academic_year__school" for models that own a School only
+    indirectly.
+    """
+
+    school_filter_lookup: str = "school"
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        return queryset.filter(**{self.school_filter_lookup: self.current_school})
+
+
 class ProtectedDeleteMixin:
     def form_valid(self, form):
         try:
@@ -63,7 +87,7 @@ class ProtectedDeleteMixin:
             return redirect(self.get_success_url())
 
 
-class SchedulerListView(SchoolAccessRequiredMixin, ListView):
+class SchedulerListView(SchoolScopedQuerysetMixin, SchoolAccessRequiredMixin, ListView):
     template_name = "scheduler/object_list.html"
     context_object_name = "objects"
 
@@ -93,6 +117,31 @@ class SchedulerCreateView(SchoolAccessRequiredMixin, SuccessMessageMixin, Create
     title = ""
     list_url_name = ""
 
+    # Set to True on subclasses whose model has a direct `school` FK.
+    # `school` is never a form field for these models (it must not be
+    # client-choosable) — the view assigns it instead.
+    assign_current_school = False
+
+    def get_form_kwargs(self) -> dict[str, Any]:
+        kwargs = super().get_form_kwargs()
+        # Forms that accept a `school` kwarg (Period, Lesson) use it to
+        # scope their ModelChoiceFields to the current school; forms
+        # that don't need it (Teacher, Room, ...) simply ignore it.
+        kwargs["school"] = self.current_school
+        return kwargs
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        if self.assign_current_school:
+            # Assigned in get_form() rather than form_valid(): the
+            # per-school UniqueConstraint(school, name) is checked by
+            # ModelForm.validate_unique() during form.is_valid(), which
+            # runs before form_valid() — school must already be set on
+            # the instance by then, or the uniqueness check silently
+            # validates against school=None instead of the real school.
+            form.instance.school = self.current_school
+        return form
+
     def get_success_url(self) -> str:
         return self._safe_next_url() or reverse_lazy(self.list_url_name)
 
@@ -118,12 +167,17 @@ class SchedulerCreateView(SchoolAccessRequiredMixin, SuccessMessageMixin, Create
         return context
 
 
-class SchedulerUpdateView(SchoolAccessRequiredMixin, SuccessMessageMixin, UpdateView):
+class SchedulerUpdateView(SchoolScopedQuerysetMixin, SchoolAccessRequiredMixin, SuccessMessageMixin, UpdateView):
     template_name = "scheduler/object_form.html"
     success_message = "Updated successfully."
     title = ""
     list_url_name = ""
 
+    def get_form_kwargs(self) -> dict[str, Any]:
+        kwargs = super().get_form_kwargs()
+        kwargs["school"] = self.current_school
+        return kwargs
+
     def get_success_url(self) -> str:
         return self._safe_next_url() or reverse_lazy(self.list_url_name)
 
@@ -149,7 +203,7 @@ class SchedulerUpdateView(SchoolAccessRequiredMixin, SuccessMessageMixin, Update
         return context
 
 
-class SchedulerDeleteView(SchoolAccessRequiredMixin, ProtectedDeleteMixin, DeleteView):
+class SchedulerDeleteView(SchoolScopedQuerysetMixin, SchoolAccessRequiredMixin, ProtectedDeleteMixin, DeleteView):
     template_name = "scheduler/object_confirm_delete.html"
     title = ""
     list_url_name = ""
@@ -175,6 +229,7 @@ class TeacherListView(SchedulerListView):
 class TeacherCreateView(SchedulerCreateView):
     model = Teacher
     form_class = TeacherForm
+    assign_current_school = True
     title = "New Teacher"
     list_url_name = "teacher-list"
 
@@ -204,6 +259,7 @@ class RoomListView(SchedulerListView):
 class RoomCreateView(SchedulerCreateView):
     model = Room
     form_class = RoomForm
+    assign_current_school = True
     title = "New Room"
     list_url_name = "room-list"
 
@@ -233,6 +289,7 @@ class SubjectListView(SchedulerListView):
 class SubjectCreateView(SchedulerCreateView):
     model = Subject
     form_class = SubjectForm
+    assign_current_school = True
     title = "New Subject"
     list_url_name = "subject-list"
 
@@ -262,6 +319,7 @@ class StudentGroupListView(SchedulerListView):
 class StudentGroupCreateView(SchedulerCreateView):
     model = StudentGroup
     form_class = StudentGroupForm
+    assign_current_school = True
     title = "New Student Group"
     list_url_name = "student-group-list"
 
@@ -291,6 +349,7 @@ class AcademicYearListView(SchedulerListView):
 class AcademicYearCreateView(SchedulerCreateView):
     model = AcademicYear
     form_class = AcademicYearForm
+    assign_current_school = True
     title = "New Academic Year"
     list_url_name = "academic-year-list"
 
@@ -311,6 +370,7 @@ class AcademicYearDeleteView(SchedulerDeleteView):
 class PeriodListView(SchedulerListView):
     model = Period
     queryset = Period.objects.select_related("academic_year")
+    school_filter_lookup = "academic_year__school"
     title = "Periods"
     create_url_name = "period-create"
     edit_url_name = "period-update"
@@ -335,12 +395,14 @@ class PeriodCreateView(SchedulerCreateView):
 class PeriodUpdateView(SchedulerUpdateView):
     model = Period
     form_class = PeriodForm
+    school_filter_lookup = "academic_year__school"
     title = "Edit Period"
     list_url_name = "period-list"
 
 
 class PeriodDeleteView(SchedulerDeleteView):
     model = Period
+    school_filter_lookup = "academic_year__school"
     title = "Delete Period"
     list_url_name = "period-list"
 
@@ -350,6 +412,7 @@ class LessonListView(SchedulerListView):
     queryset = Lesson.objects.select_related(
         "teacher", "subject", "room", "student_group", "start_period"
     )
+    school_filter_lookup = "start_period__academic_year__school"
     title = "Lessons"
     create_url_name = "lesson-create"
     edit_url_name = "lesson-update"
@@ -415,6 +478,7 @@ class LessonCreateView(LessonWriteMixin, SchedulerCreateView):
 class LessonUpdateView(LessonWriteMixin, SchedulerUpdateView):
     model = Lesson
     form_class = LessonForm
+    school_filter_lookup = "start_period__academic_year__school"
     title = "Edit Lesson"
     list_url_name = "lesson-list"
     is_update = True
@@ -422,6 +486,7 @@ class LessonUpdateView(LessonWriteMixin, SchedulerUpdateView):
 
 class LessonDeleteView(SchedulerDeleteView):
     model = Lesson
+    school_filter_lookup = "start_period__academic_year__school"
     title = "Delete Lesson"
     list_url_name = "lesson-list"
 

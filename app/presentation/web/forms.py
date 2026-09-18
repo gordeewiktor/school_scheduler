@@ -13,44 +13,64 @@ from app.infrastructure.database.models import (
 
 
 class BaseStyledModelForm(forms.ModelForm):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, school=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             css_class = "form-select" if isinstance(field.widget, forms.Select) else "form-control"
             field.widget.attrs.setdefault("class", css_class)
 
+    def _get_validation_exclusions(self):
+        # `school` is never a form field for school-owned resources (it's
+        # assigned server-side, see SchedulerCreateView.get_form()), so
+        # Django's default ModelForm behaviour excludes it from
+        # validate_unique() entirely — which would silently skip the
+        # per-school UniqueConstraint(school, name) check and let a
+        # duplicate name reach the database as a raw IntegrityError.
+        # Since the instance's `school` is already correctly set by the
+        # time validation runs, keep it included in the check.
+        exclude = super()._get_validation_exclusions()
+        if "school" in exclude and getattr(self.instance, "school_id", None) is not None:
+            exclude.remove("school")
+        return exclude
+
 
 class TeacherForm(BaseStyledModelForm):
     class Meta:
         model = Teacher
-        fields = ["school", "name", "email"]
+        fields = ["name", "email"]
 
 
 class RoomForm(BaseStyledModelForm):
     class Meta:
         model = Room
-        fields = ["school", "name", "capacity"]
+        fields = ["name", "capacity"]
 
 
 class SubjectForm(BaseStyledModelForm):
     class Meta:
         model = Subject
-        fields = ["school", "name", "code"]
+        fields = ["name", "code"]
 
 
 class StudentGroupForm(BaseStyledModelForm):
     class Meta:
         model = StudentGroup
-        fields = ["school", "name", "size"]
+        fields = ["name", "size"]
 
 
 class AcademicYearForm(BaseStyledModelForm):
     class Meta:
         model = AcademicYear
-        fields = ["school", "name", "default_period_duration"]
+        fields = ["name", "default_period_duration"]
 
 
 class PeriodForm(BaseStyledModelForm):
+    def __init__(self, *args, school=None, **kwargs) -> None:
+        super().__init__(*args, school=school, **kwargs)
+        # Fail closed: with no school, offer no academic years at all
+        # rather than falling back to every school's.
+        self.fields["academic_year"].queryset = AcademicYear.objects.filter(school=school)
+
     class Meta:
         model = Period
         fields = ["academic_year", "name", "order", "start_time", "end_time", "kind"]
@@ -67,8 +87,18 @@ class PeriodForm(BaseStyledModelForm):
 
 
 class LessonForm(BaseStyledModelForm):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args, school=None, **kwargs) -> None:
+        super().__init__(*args, school=school, **kwargs)
+        # Fail closed: with no school, every one of these fields offers
+        # zero choices rather than falling back to every school's.
+        self.fields["teacher"].queryset = Teacher.objects.filter(school=school)
+        self.fields["planned_substitute"].queryset = Teacher.objects.filter(school=school)
+        self.fields["subject"].queryset = Subject.objects.filter(school=school)
+        self.fields["room"].queryset = Room.objects.filter(school=school)
+        self.fields["student_group"].queryset = StudentGroup.objects.filter(school=school)
+        self.fields["start_period"].queryset = Period.objects.filter(
+            academic_year__school=school
+        )
         self.fields["planned_substitute"].label = "Substitution Teacher"
         self.fields["planned_substitute"].empty_label = "No substitution teacher"
 

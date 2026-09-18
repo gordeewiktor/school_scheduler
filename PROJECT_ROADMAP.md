@@ -295,7 +295,7 @@ choice, or object lookup is scoped by school yet. `ScheduleView`'s
 are untouched. Django Admin is untouched (see §24 of
 `PROJECT_CONTEXT.md`).
 
-## Phase 4B — Plain-CRUD query/object/form scoping (not started)
+## Phase 4B — Plain-CRUD query/object/form scoping (done)
 
 Audit and eliminate unscoped queries such as:
 
@@ -307,28 +307,69 @@ and:
 
 when they can expose another school's data.
 
-- [ ] AcademicYear queries scoped by School.
-- [ ] Teacher queries scoped by School.
-- [ ] Room queries scoped by School.
-- [ ] Subject queries scoped by School.
-- [ ] StudentGroup queries scoped by School.
-- [ ] Period queries scoped through AcademicYear.
+- [x] AcademicYear queries scoped by School.
+- [x] Teacher queries scoped by School.
+- [x] Room queries scoped by School.
+- [x] Subject queries scoped by School.
+- [x] StudentGroup queries scoped by School.
+- [x] Period queries scoped through AcademicYear.
+- [x] Lesson queries scoped through AcademicYear/School.
 
 Generic Django views must not allow a principal to manipulate an
 object belonging to another school by guessing its primary key.
 
-- [ ] Audit and scope UpdateViews' `get_queryset()`.
-- [ ] Audit and scope DeleteViews' `get_queryset()`.
-- [ ] Audit CreateViews — force-assign `school` server-side instead of
+- [x] Audit and scope UpdateViews' `get_queryset()`.
+- [x] Audit and scope DeleteViews' `get_queryset()`.
+- [x] Audit CreateViews — force-assign `school` server-side instead of
       exposing it as a client-choosable form field.
-- [ ] Audit custom `get_object()` calls.
-- [ ] Add tests for cross-school access (404 on another school's id).
+- [x] Audit custom `get_object()` calls (none exist beyond Django's
+      generic `SingleObjectMixin.get_object()`, which reuses
+      `get_queryset()` — confirmed a foreign pk 404s, not 403/200).
+- [x] Add tests for cross-school access (404 on another school's id).
 
 ModelChoiceFields must not expose objects belonging to another school.
 
-- [ ] AcademicYear choices scoped (`PeriodForm`).
-- [ ] Teacher/Room/Subject/StudentGroup/Period choices scoped
-      (`LessonForm`).
+- [x] AcademicYear choices scoped (`PeriodForm`).
+- [x] Teacher/Room/Subject/StudentGroup/Period/planned_substitute
+      choices scoped (`LessonForm`).
+
+### Implementation notes
+
+- `SchoolScopedQuerysetMixin` (`views.py`): one `school_filter_lookup`
+  attribute + one `get_queryset()` override, applied to
+  `SchedulerListView`/`SchedulerUpdateView`/`SchedulerDeleteView`.
+  Default lookup `"school"`; `"academic_year__school"` for Period;
+  `"start_period__academic_year__school"` for Lesson. This single
+  mixin gives Update/Delete their 404-on-foreign-pk protection for
+  free, since Django's `SingleObjectMixin.get_object()` is built from
+  `get_queryset()`.
+- `school` removed from `TeacherForm`/`RoomForm`/`SubjectForm`/
+  `StudentGroupForm`/`AcademicYearForm`'s `Meta.fields`.
+  `SchedulerCreateView` gained `assign_current_school` (bool, `True` on
+  those five Create views) and a `get_form()` override assigning
+  `form.instance.school = self.current_school` — in `get_form()`, not
+  `form_valid()`, because `ModelForm.validate_unique()` runs during
+  `is_valid()`, before `form_valid()`.
+- **Bug caught mid-implementation, not after**: removing `school` from
+  `Meta.fields` makes Django's own field-exclusion logic drop `school`
+  from `validate_unique()` entirely, silently skipping the per-school
+  `UniqueConstraint(school, name)` check and letting a duplicate reach
+  the database as a raw `IntegrityError`. Fixed with a small
+  `_get_validation_exclusions()` override on `BaseStyledModelForm` that
+  keeps `school` in the check once the view has set it on the instance.
+  `test_create_enforces_per_school_name_uniqueness` caught this the
+  first time the new tests were run.
+- `BaseStyledModelForm.__init__` accepts a `school=None` kwarg (ignored
+  by forms that don't need it); `SchedulerCreateView`/
+  `SchedulerUpdateView.get_form_kwargs()` inject it unconditionally.
+  `PeriodForm`/`LessonForm` use it to scope their `ModelChoiceField`s
+  via `.filter(school=school)` (fail-closed: a missing `school` yields
+  zero choices, never every school's).
+- Phase 3's `CrossSchoolLessonError` guard is untouched and still
+  covered by `tests/integration/test_lesson_school_integrity.py`. It's
+  now a defense-in-depth safety net rather than the primary defense for
+  the CRUD path — `LessonForm`'s scoped fields mean a foreign id is
+  now rejected earlier, as a field-level "select a valid choice" error.
 
 ## Phase 4C — Lesson/scheduling subsystem scoping (not started)
 
@@ -630,20 +671,21 @@ Implement the next small architectural step toward multi-school support.
 ## Current status
 
 Phases 1–3 (School/SchoolMembership foundation, AcademicYear ownership,
-Teacher/Room/Subject/StudentGroup ownership) are implemented, verified,
-and committed. Phase 4A (current-school and membership-access
-foundation) is implemented and verified, and not yet committed. The
-existing "principal" user still has not been attached to a school —
+Teacher/Room/Subject/StudentGroup ownership) and Phase 4A
+(current-school/membership-access foundation) are implemented,
+verified, and committed. Phase 4B (CRUD school data isolation) is
+implemented and verified, and not yet committed. The existing
+"principal" user still has not been attached to a school —
 `create_school` remains written but intentionally not run. The real dev
 database is migrated through `0012`; no migration was needed for
-Phase 4A.
+Phase 4A or Phase 4B.
 
 ## Immediate next step
 
-1. Review the diff for the Phase 4A slice.
+1. Review the diff for the Phase 4B slice.
 2. Decide whether/when to run `create_school` against the dev database.
 3. Commit.
-4. Move to Phase 4B (plain-CRUD query/object/form scoping — see the
+4. Move to Phase 4C (Lesson/scheduling subsystem scoping — see the
    Phase 4 section above).
 
 ---
@@ -966,9 +1008,130 @@ current-school/authorization foundation.
 
 ### Current task
 
-Phase 4A is implemented and verified but not committed.
+Phase 4A was implemented and verified, and has since been committed
+(`b538cc1`).
 
 ### Next
 
-Review the diff, decide on committing, then move to Phase 4B (plain-CRUD
-query/object/form scoping).
+Move to Phase 4B (plain-CRUD query/object/form scoping).
+
+## 2026-09-20 — Phase 4B: CRUD school data isolation
+
+### Completed
+
+- `SchoolScopedQuerysetMixin` (`views.py`): `school_filter_lookup`
+  class attribute (default `"school"`) + `get_queryset()` override,
+  applied to `SchedulerListView`, `SchedulerUpdateView`, and
+  `SchedulerDeleteView`. `PeriodListView`/`PeriodUpdateView`/
+  `PeriodDeleteView` override the lookup to `"academic_year__school"`;
+  `LessonListView`/`LessonUpdateView`/`LessonDeleteView` override it to
+  `"start_period__academic_year__school"`. This scopes every list page
+  to the current school and, since Django's
+  `SingleObjectMixin.get_object()` is built from `get_queryset()`,
+  makes Update/Delete 404 on another school's id for free — verified
+  directly (GET and POST) rather than assumed.
+- `SchedulerCreateView` gained `assign_current_school` (bool flag, `True`
+  on `TeacherCreateView`/`RoomCreateView`/`SubjectCreateView`/
+  `StudentGroupCreateView`/`AcademicYearCreateView` only) and a
+  `get_form()` override assigning `form.instance.school =
+  self.current_school` — before `form.is_valid()` runs, not after, so
+  the per-school `UniqueConstraint(school, name)` check validates
+  against the real school.
+- Removed `"school"` from `TeacherForm`/`RoomForm`/`SubjectForm`/
+  `StudentGroupForm`/`AcademicYearForm`'s `Meta.fields` — it is never a
+  client-choosable field for these five models.
+- **Caught and fixed a real Django subtlety during implementation**
+  (not discovered later): removing `school` from `Meta.fields` makes
+  Django's `ModelForm._get_validation_exclusions()` exclude it from
+  `validate_unique()` entirely, silently skipping the per-school
+  uniqueness check and letting a duplicate name reach the database as
+  a raw `IntegrityError`. Fixed with a targeted
+  `_get_validation_exclusions()` override on `BaseStyledModelForm`:
+  keep `school` in the check once the view has actually set it on the
+  instance. `test_create_enforces_per_school_name_uniqueness` failed
+  with exactly this `IntegrityError` on the first run, before the fix.
+- `BaseStyledModelForm.__init__` accepts a `school=None` keyword
+  (silently ignored by forms that don't need it).
+  `SchedulerCreateView`/`SchedulerUpdateView.get_form_kwargs()` both
+  inject `school=self.current_school` unconditionally. `PeriodForm`
+  uses it to scope `academic_year` to
+  `AcademicYear.objects.filter(school=school)`; `LessonForm` uses it to
+  scope `teacher`, `planned_substitute`, `subject`, `room`,
+  `student_group` (all `.filter(school=school)`) and `start_period`
+  (`.filter(academic_year__school=school)`). Every one fails *closed*
+  (zero choices) rather than falling back to `.objects.all()` if
+  `school` is ever missing.
+- Verified Phase 3's `CrossSchoolLessonError` guard
+  (`ScheduleService._ensure_same_school`) is unmodified and its test
+  file (`tests/integration/test_lesson_school_integrity.py`) still
+  passes unchanged — it's now a defense-in-depth safety net rather than
+  the primary defense for the CRUD path, since `LessonForm`'s scoped
+  fields reject a foreign id earlier, as a field-level error.
+- Added `make_principal_client` to `tests/conftest.py` — a factory
+  fixture (built on the existing `make_user`/`make_school`/
+  `make_membership`) returning a logged-in `Client` for a fresh
+  School's principal, with the School attached as `.school` for reuse
+  in test bodies.
+- Added `tests/integration/test_crud_school_isolation.py` (61 tests):
+  list-only-shows-current-school, GET/POST Update and Delete
+  404-on-foreign-pk (with object-unchanged/object-remains assertions),
+  and Create-assigns-current-school/no-school-field/
+  per-school-uniqueness/cross-school-name-reuse, parametrized across
+  Teacher/Room/Subject/StudentGroup/AcademicYear; dedicated Period
+  tests (list/update/delete IDOR, `academic_year` form scoping,
+  reject-foreign-academic-year on both create and update); dedicated
+  Lesson tests (list/update/delete IDOR, form-only-offers-current-school
+  for every field, reject-foreign-id parametrized across
+  teacher/planned_substitute/subject/room/student_group, and a
+  dedicated `start_period` case).
+- Fixed `tests/integration/test_web_pages.py`'s fixtures: `lesson_form_data`
+  now depends on `authenticated_client` and reuses `authenticated_client.school`
+  (exposed as a `.school` attribute on the fixture's `Client`) instead of
+  creating its own unrelated school — the two fixtures previously
+  referred to different schools, which only mattered once forms/querysets
+  became school-scoped.
+- Updated 5 tests whose premise Phase 4B's scoping directly affected:
+  `test_create_period_from_time_input`/`test_invalid_period_time_returns_form_errors`
+  (reuse `authenticated_client.school` instead of an unrelated local
+  school), `test_academic_year_list_shows_school_column` (same, plus
+  asserting the real school name), and a rewrite of
+  `test_create_academic_year_requires_a_school`/
+  `test_create_academic_year_with_school_succeeds` into
+  `test_create_academic_year_has_no_school_field`/
+  `test_create_academic_year_assigns_current_school` — their old premise
+  (the client selects a school) is exactly what Phase 4B removes.
+  `test_lesson_form_rejects_room_from_another_school`'s assertion moved
+  from `form.non_field_errors()` (Phase 3's guard) to
+  `form.errors["room"]` (Phase 4B's field-level rejection) — the
+  behavior it protects is unchanged, only which layer catches it.
+- Verification performed:
+  - `manage.py check` → no issues.
+  - `makemigrations --check --dry-run` → no changes detected (no
+    schema change was needed).
+  - Full pytest suite → 236 passed, 1 pre-existing failure unrelated to
+    this change (`test_administrator_navigation`, same failure present
+    before Phase 4B).
+  - `git diff` reviewed in full: changes limited to
+    `app/presentation/web/views.py`, `app/presentation/web/forms.py`,
+    `tests/conftest.py`, `tests/integration/test_web_pages.py`, plus
+    the new isolation test file — `ScheduleView`, `StaffScheduleView`,
+    `TeacherSubstitutionView`/`TeacherSubstitutionForm`,
+    `GeneratePlannedSubstitutionsView`, `DjangoLessonRepository`,
+    `ScheduleService`, `SubstitutionService`, `ConflictService`, and
+    `SchoolMembership` are all untouched.
+- Explicitly NOT done (deferred to 4C/4D, per scope): `ScheduleView`/
+  `StaffScheduleView`/`TeacherSubstitutionView`/
+  `GeneratePlannedSubstitutionsView` remain fully unscoped; no deeper
+  repository/service school guard beyond Phase 3's was added; no
+  template/navigation `is_staff` cleanup; no URL redesign; no `school`
+  FK added to `Lesson`; no `SchoolMembership` changes; no registration/
+  invitation/onboarding/billing/deployment work.
+
+### Current task
+
+Phase 4B is implemented and verified but not committed.
+
+### Next
+
+Review the diff, decide on committing, then move to Phase 4C
+(Lesson/scheduling subsystem scoping).
