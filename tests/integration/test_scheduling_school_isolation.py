@@ -145,3 +145,69 @@ def test_staff_schedule_defaults_to_current_schools_academic_year(make_principal
     assert response.context["selected_academic_year"] == str(year_a.pk)
     assert b"Ada A" in response.content
     assert b"Bob B" not in response.content
+
+
+# --- 4C-4: TeacherSubstitutionForm/View ------------------------------------
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_form_only_offers_current_school_choices(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    year_a, period_a = _make_year_and_period(client_a.school)
+    year_b, period_b = _make_year_and_period(client_b.school)
+
+    response = client_a.get(reverse("teacher-substitution"))
+    form = response.context["form"]
+
+    assert list(form.fields["academic_year"].queryset) == [year_a]
+    assert list(form.fields["period"].queryset) == [period_a]
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_rejects_another_schools_academic_year(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    year_b, period_b = _make_year_and_period(client_b.school)
+
+    response = client_a.get(
+        reverse("teacher-substitution"),
+        {"academic_year": year_b.pk, "day": "MONDAY", "period": period_b.pk},
+    )
+
+    assert response.status_code == 200
+    assert response.context["available_teachers"] is None
+    assert response.context["form"].errors["academic_year"]
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_rejects_another_schools_period(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    year_a, period_a = _make_year_and_period(client_a.school)
+    year_b, period_b = _make_year_and_period(client_b.school)
+
+    response = client_a.get(
+        reverse("teacher-substitution"),
+        {"academic_year": year_a.pk, "day": "MONDAY", "period": period_b.pk},
+    )
+
+    assert response.status_code == 200
+    assert response.context["available_teachers"] is None
+    assert response.context["form"].errors["period"]
+
+
+@pytest.mark.django_db
+def test_teacher_substitution_still_works_for_current_school(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    year_a, period_a, lesson_a = _make_lesson(client_a.school, teacher_name="Busy Teacher")
+    Teacher.objects.create(school=client_a.school, name="Free Teacher")
+
+    response = client_a.get(
+        reverse("teacher-substitution"),
+        {"academic_year": year_a.pk, "day": "MONDAY", "period": period_a.pk},
+    )
+
+    assert response.status_code == 200
+    available_names = {teacher.name for teacher in response.context["available_teachers"]}
+    assert available_names == {"Free Teacher"}

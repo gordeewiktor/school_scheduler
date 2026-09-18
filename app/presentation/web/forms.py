@@ -118,18 +118,20 @@ class LessonForm(BaseStyledModelForm):
 
 
 class TeacherSubstitutionForm(forms.Form):
-    academic_year = forms.ModelChoiceField(queryset=AcademicYear.objects.all())
+    academic_year = forms.ModelChoiceField(queryset=AcademicYear.objects.none())
     day = forms.ChoiceField(
         choices=[(day.value, day.name.replace("_", " ").title()) for day in Day]
     )
-    period = forms.ModelChoiceField(queryset=Period.objects.all())
+    period = forms.ModelChoiceField(queryset=Period.objects.none())
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, school=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.fields["academic_year"].queryset = AcademicYear.objects.all()
+        # Fail closed: with no school, offer no academic years/periods
+        # at all rather than falling back to every school's.
+        self.fields["academic_year"].queryset = AcademicYear.objects.filter(school=school)
         self.fields["period"].queryset = Period.objects.select_related(
             "academic_year"
-        ).all()
+        ).filter(academic_year__school=school)
 
         for field in self.fields.values():
             field.widget.attrs.setdefault(

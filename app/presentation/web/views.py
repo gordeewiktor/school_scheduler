@@ -772,7 +772,7 @@ class TeacherSubstitutionView(SchoolAccessRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        form = TeacherSubstitutionForm(self.request.GET or None)
+        form = TeacherSubstitutionForm(self.request.GET or None, school=self.current_school)
         available_teachers = None
 
         if form.is_bound and form.is_valid():
