@@ -1,0 +1,22 @@
+{% extends "scheduler/base.html" %}
+
+{% block title %}Choose School{% endblock %}
+
+{% block content %}
+<h1 class="h2 mb-3">Choose a school</h1>
+<p class="text-muted mb-4">You belong to more than one school. Choose which one you want to work in.</p>
+<form method="post" class="border rounded p-3" style="max-width: 420px;">
+    {% csrf_token %}
+    {% for membership in memberships %}
+        <div class="form-field mb-3">
+            <label class="form-label">
+                <input type="radio" name="school_id" value="{{ membership.school_id }}" required>
+                {{ membership.school.name }}
+            </label>
+        </div>
+    {% endfor %}
+    <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Continue</button>
+    </div>
+</form>
+{% endblock %}

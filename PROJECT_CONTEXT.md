@@ -376,11 +376,53 @@ A dedicated membership model now exists: `SchoolMembership`
 `User` can belong to multiple `School`s and a `School` can have
 multiple members, via separate `SchoolMembership` rows.
 
-There is currently no "current school" resolution logic (no session/
-request-level notion of "the school I'm acting as") — that is Phase 4
-of the roadmap, not yet implemented. `SchoolMembership` rows are not
-yet consulted anywhere outside the `create_school` management command
-and admin.
+Current-school resolution now exists (Phase 4A —
+`app/presentation/web/school_access.py`). `CurrentSchoolService` is a
+small, session-based helper (no repository/protocol layer — this is
+plain-CRUD-shaped logic, the same category as the existing Teacher/
+Room/Subject/StudentGroup/AcademicYear views, not the Lesson/scheduling
+subsystem):
+
+- The session stores only a `current_school_id` *hint*
+  (`CURRENT_SCHOOL_SESSION_KEY`, defined once as a constant). It is
+  never treated as proof of access.
+- `CurrentSchoolService.resolve(request)` re-validates that hint (or
+  auto-selects when the user has exactly one `SchoolMembership`) against
+  a live, `role=PRINCIPAL` `SchoolMembership` query on every call — a
+  membership revoked mid-session, or a session value that never
+  corresponded to a real membership, is discarded rather than trusted,
+  and access stops on the very next request.
+- `CurrentSchoolService.set_current(request, school_id)` is the only
+  way to change the session value, and only succeeds if the requesting
+  user actually holds a `PRINCIPAL` `SchoolMembership` for that
+  `school_id`; a foreign or nonexistent id changes nothing and returns
+  `None`.
+- `SchoolAccessRequiredMixin` (replacing the old `AdministratorRequiredMixin`)
+  requires login, resolves the current school via the service above, and
+  exposes it as `self.current_school`. Zero memberships renders a
+  minimal "no school access" page (403); multiple memberships with
+  nothing validly selected redirect to a minimal `ChooseSchoolView`
+  (`/choose-school/`) that only ever lists — and only ever accepts — the
+  requesting user's own memberships.
+- This mixin now gates every view that used to check `is_staff`
+  (`SchedulerListView`/`CreateView`/`UpdateView`/`DeleteView` and their
+  Teacher/Room/Subject/StudentGroup/AcademicYear/Period/Lesson
+  subclasses, `StaffScheduleView`, `TeacherSubstitutionView`,
+  `GeneratePlannedSubstitutionsView`). `is_staff`/`is_superuser` play no
+  role in this decision at all — a superuser with no `SchoolMembership`
+  is denied exactly like anyone else; a non-staff user with a
+  `PRINCIPAL` membership is allowed.
+
+**Phase 4A scope note**: this establishes *who may act as which
+school* and gives every gated view a trustworthy `self.current_school`.
+It deliberately does **not** yet scope any queryset, form choice, or
+object lookup by that school — a Teacher/Room/Lesson list view still
+returns every school's rows, and Create/Update views still don't force
+resources onto `self.current_school`. That queryset/object/form scoping
+is Phase 4B. The `ScheduleView` (public timetable) and its `is_staff`
+checks, and all remaining `is_staff` checks in templates
+(`schedule.html`, `navigation.py`), are also untouched — those are
+Phase 4B–4D work.
 
 A `create_school` management command exists to create a `School` and
 attach an existing `User` to it as a principal
@@ -390,7 +432,10 @@ against the development database yet.
 The important architectural decision is:
 
 `is_staff` should NOT be used as the application's concept of school
-ownership.
+ownership. This is now enforced in code (§ above), not just an
+intention: `is_staff`/`is_superuser` are reserved for Django Admin
+access only (see §24) and are never consulted by
+`SchoolAccessRequiredMixin` or `CurrentSchoolService`.
 
 A user being a Django staff user and a user being a principal/member of
 a particular school are separate concepts.
@@ -760,6 +805,20 @@ For the initial multi-school implementation:
 - Admin access should remain appropriately restricted.
 - `is_staff` should remain separate from School membership.
 
+Confirmed and unchanged by Phase 4A: Django Admin continues to use
+Django's own `is_staff`/permission system exactly as before, with no
+row-level School filtering. This is a deliberate, accepted MVP
+constraint, not an oversight — retrofitting per-school row visibility
+into every `ModelAdmin` (`get_queryset`, `has_change_permission`,
+`formfield_for_foreignkey`) is real work the MVP doesn't need yet. The
+operational rule this depends on: **ordinary principals must never be
+granted `is_staff=True`** — doing so would give them full Django Admin
+visibility into every school's data, bypassing the application-level
+`SchoolAccessRequiredMixin`/`CurrentSchoolService` boundary entirely.
+Nothing in the codebase currently prevents an operator from setting
+`is_staff=True` on a principal's account by mistake; there is no
+technical safeguard against it, only this documented rule.
+
 A more sophisticated school-specific admin system can be designed later
 if needed.
 
@@ -1014,14 +1073,41 @@ possible/necessary (see §17, §19, §20 for detail):
   Phase 6, not the full lesson/scheduling access-control system.
 - School-scoped `list_teachers()`, threaded through
   `SubstitutionService` and `ScheduleService.staff_schedule()` — a slice
-  of Phase 7, not the full Phase 4 authorization system (there is still
-  no current-school resolution).
+  of Phase 7, not the full Phase 4 authorization system (Phase 4A, below,
+  is what added actual current-school resolution).
 
-The next implementation step is:
+**Phase 4A (current-school and membership-access foundation) is
+implemented** (see §12, §24): `CurrentSchoolService`, session-based
+current-school resolution/revalidation/selection, `ChooseSchoolView`,
+the no-school-access page, and `SchoolAccessRequiredMixin` replacing
+`is_staff`-based gating on every previously `AdministratorRequiredMixin`
+-protected view. No database migration was needed — `SchoolMembership`
+already had everything Phase 4A required.
 
-    Enforce school-wide data isolation (Phase 4): resolve a current
-    school from the authenticated user, scope the remaining unscoped
-    queries and ModelChoiceFields, and add IDOR protection.
+Phase 4A deliberately stops at authorization/current-school resolution.
+It does **not** scope any queryset, form choice, or object lookup by
+school yet — every list view, form dropdown, and object-detail
+Update/Delete view is still effectively global once a user has *any*
+resolvable current school (the IDOR/cross-school-disclosure findings
+from the Phase 4 inspection are all still open).
+
+The next implementation steps are:
+
+    Phase 4B: scope the plain-CRUD views (Teacher/Room/Subject/
+    StudentGroup/AcademicYear/Period/Lesson) — list-view querysets,
+    Update/Delete get_queryset() (closes the IDOR gap), and
+    force-assigning `school` server-side on Create instead of exposing
+    it as a form field.
+
+    Phase 4C: thread current-school context through the Lesson/
+    ScheduleService/SubstitutionService/ConflictService/
+    DjangoLessonRepository subsystem, closing the ScheduleView/
+    StaffScheduleView/TeacherSubstitutionView/
+    GeneratePlannedSubstitutionsView cross-tenant disclosure found
+    during the Phase 4 inspection.
+
+    Phase 4D: remaining `is_staff` cleanup in templates/navigation,
+    full regression/IDOR audit sweep, documentation.
 
 Everything should be implemented incrementally and tested after each
 meaningful change.

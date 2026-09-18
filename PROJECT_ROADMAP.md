@@ -248,21 +248,54 @@ reusable across multiple academic years:
 
 # Phase 4 — School Data Isolation
 
-This is a critical security phase.
+This is a critical security phase. It is split into four small,
+independently-reviewable slices: 4A (current-school/membership
+authorization foundation — **done**), 4B (plain-CRUD query/object/form
+scoping), 4C (Lesson/scheduling subsystem scoping), 4D (remaining
+`is_staff` cleanup + full regression/IDOR audit).
 
 Every authenticated principal must operate inside their own school
-context.
+context. Phase 4A establishes *whose* context that is; Phases 4B–4D
+make every view/service/query actually respect it.
 
-## School resolution
+## Phase 4A — Current-school and membership-access foundation (done)
 
-- [ ] Resolve the current school from the authenticated user's
-      Principal/membership.
-- [ ] Never trust a client-supplied school ID for authenticated
-      operations.
-- [ ] Establish a consistent way for views/services to obtain the
-      current school.
+- [x] Resolve the current school from the authenticated user's
+      SchoolMembership.
+- [x] Never trust a client-supplied school ID — `CurrentSchoolService`
+      re-validates every session-stored id, and every selection,
+      against a live, `role=PRINCIPAL` `SchoolMembership` row.
+- [x] Establish a consistent way for views to obtain the current school
+      (`SchoolAccessRequiredMixin` → `self.current_school`).
+- [x] Auto-select the current school when the user has exactly one
+      membership.
+- [x] Send a user with multiple memberships and nothing (validly)
+      selected to a minimal school-selection page
+      (`ChooseSchoolView`, `/choose-school/`).
+- [x] Reject selection of a school the user does not belong to, and of
+      a nonexistent school id.
+- [x] A membership removed while its school is the session's current
+      selection stops granting access on the very next request (no
+      caching of the authorization decision).
+- [x] Zero-membership users get a simple "no school access" page
+      instead of a 500 or a silent administrator fallback.
+- [x] `is_staff`/`is_superuser` play no role in this decision anywhere
+      — replaced the `is_staff`-based `AdministratorRequiredMixin` with
+      `SchoolAccessRequiredMixin` on every view that used it
+      (`SchedulerListView`/`CreateView`/`UpdateView`/`DeleteView` and
+      their Teacher/Room/Subject/StudentGroup/AcademicYear/Period/
+      Lesson subclasses, `StaffScheduleView`, `TeacherSubstitutionView`,
+      `GeneratePlannedSubstitutionsView`). A superuser with no
+      membership is denied; a non-staff user with a PRINCIPAL
+      membership is allowed.
 
-## Query isolation
+Deliberately NOT done in 4A (see 4B/4C below): no queryset, form
+choice, or object lookup is scoped by school yet. `ScheduleView`'s
+`is_staff` checks and all `is_staff` checks in templates/`navigation.py`
+are untouched. Django Admin is untouched (see §24 of
+`PROJECT_CONTEXT.md`).
+
+## Phase 4B — Plain-CRUD query/object/form scoping (not started)
 
 Audit and eliminate unscoped queries such as:
 
@@ -280,32 +313,45 @@ when they can expose another school's data.
 - [ ] Subject queries scoped by School.
 - [ ] StudentGroup queries scoped by School.
 - [ ] Period queries scoped through AcademicYear.
-- [ ] Lesson queries scoped through AcademicYear/School.
-- [ ] Substitute-teacher queries scoped by School.
-- [ ] Schedule queries scoped by School.
-
-## IDOR protection
 
 Generic Django views must not allow a principal to manipulate an
 object belonging to another school by guessing its primary key.
 
-- [ ] Audit UpdateViews.
-- [ ] Audit DeleteViews.
-- [ ] Audit DetailViews.
-- [ ] Audit CreateViews.
+- [ ] Audit and scope UpdateViews' `get_queryset()`.
+- [ ] Audit and scope DeleteViews' `get_queryset()`.
+- [ ] Audit CreateViews — force-assign `school` server-side instead of
+      exposing it as a client-choosable form field.
 - [ ] Audit custom `get_object()` calls.
-- [ ] Add tests for cross-school access.
-
-## Forms
+- [ ] Add tests for cross-school access (404 on another school's id).
 
 ModelChoiceFields must not expose objects belonging to another school.
 
-- [ ] AcademicYear choices scoped.
-- [ ] Teacher choices scoped.
-- [ ] Room choices scoped.
-- [ ] Subject choices scoped.
-- [ ] StudentGroup choices scoped.
-- [ ] Period choices scoped.
+- [ ] AcademicYear choices scoped (`PeriodForm`).
+- [ ] Teacher/Room/Subject/StudentGroup/Period choices scoped
+      (`LessonForm`).
+
+## Phase 4C — Lesson/scheduling subsystem scoping (not started)
+
+- [ ] Lesson queries scoped through AcademicYear/School.
+- [ ] Substitute-teacher queries scoped by School.
+- [ ] Schedule queries scoped by School.
+- [ ] `ScheduleView`/`StaffScheduleView`/`TeacherSubstitutionView`/
+      `GeneratePlannedSubstitutionsView` validate any user-suppliable
+      `academic_year`/resource id against the current school (closes
+      the cross-tenant timetable disclosure found during the Phase 4
+      inspection).
+- [ ] `DjangoLessonRepository`/`ScheduleService`/`SubstitutionService`/
+      `ConflictService` reject a school/academic-year mismatch
+      independent of the view layer.
+
+## Phase 4D — Cleanup and full audit (not started)
+
+- [ ] Replace remaining `is_staff` checks in `schedule.html` and
+      `navigation.py` that gate business features (not Django Admin)
+      with current-school/membership checks.
+- [ ] Full IDOR/security audit sweep against the Phase 4 inspection
+      checklist.
+- [ ] Full regression pass.
 
 ---
 
@@ -583,22 +629,22 @@ Implement the next small architectural step toward multi-school support.
 
 ## Current status
 
-Phase 1 (School/SchoolMembership foundation), Phase 2 (AcademicYear →
-School ownership), and Phase 3 (Teacher/Room/Subject/StudentGroup →
-School ownership) have all been implemented and verified. None of the
-three slices has been committed yet. The existing "principal" user
-still has not been attached to a school — `create_school` remains
-written but intentionally not run. The real dev database has been
-migrated through `0012`; all four resource models are owned by the same
-"Default School" that already owns "Demo 2026" and its 2100 Lessons.
+Phases 1–3 (School/SchoolMembership foundation, AcademicYear ownership,
+Teacher/Room/Subject/StudentGroup ownership) are implemented, verified,
+and committed. Phase 4A (current-school and membership-access
+foundation) is implemented and verified, and not yet committed. The
+existing "principal" user still has not been attached to a school —
+`create_school` remains written but intentionally not run. The real dev
+database is migrated through `0012`; no migration was needed for
+Phase 4A.
 
 ## Immediate next step
 
-1. Review the diff for the Phase 1, Phase 2, and Phase 3 slices.
+1. Review the diff for the Phase 4A slice.
 2. Decide whether/when to run `create_school` against the dev database.
 3. Commit.
-4. Move to Phase 4 (School data isolation: current-school resolution,
-   query/IDOR scoping, form scoping).
+4. Move to Phase 4B (plain-CRUD query/object/form scoping — see the
+   Phase 4 section above).
 
 ---
 
@@ -826,10 +872,103 @@ Teacher, Room, Subject, and StudentGroup to School).
 
 ### Current task
 
-Phase 1, Phase 2, and Phase 3 are all implemented and verified but not
-committed.
+Phase 1, Phase 2, and Phase 3 were implemented and verified, and have
+since been committed (`6f15813`, `c3202eb`, `4a29142`).
 
 ### Next
 
-Review the diff, decide on committing, then move to Phase 4 (School
-data isolation).
+Move to Phase 4 (School data isolation), starting with the 4A
+current-school/authorization foundation.
+
+## 2026-09-19 — Phase 4A: Current-school and membership-access foundation
+
+### Completed
+
+- Added `app/presentation/web/school_access.py`:
+  - `CURRENT_SCHOOL_SESSION_KEY` — the one named session-key constant
+    used everywhere (no scattered string literals).
+  - `CurrentSchoolService.memberships_for(user)` — a user's
+    `role=PRINCIPAL` `SchoolMembership` rows.
+  - `CurrentSchoolService.resolve(request)` — re-validates any
+    session-stored school id against a live membership, discarding it
+    (never trusting it) if invalid; auto-selects when the user has
+    exactly one membership; returns `None` when the choice is
+    ambiguous or there is none.
+  - `CurrentSchoolService.set_current(request, school_id)` — the only
+    way to change the session value; validates the id (including
+    non-numeric/garbage input) against the user's own memberships
+    first and changes nothing on failure.
+  - `SchoolAccessRequiredMixin(LoginRequiredMixin)` — requires login,
+    resolves the current school via the service above, exposes it as
+    `self.current_school`, redirects to `ChooseSchoolView` when
+    multiple memberships are unresolved, and renders a minimal
+    "no school access" page (403) otherwise. Does not consult
+    `is_staff`/`is_superuser` at all.
+  - No repository/protocol abstraction was introduced — this talks to
+    `SchoolMembership`/`School` directly via the ORM, the same way the
+    existing plain-CRUD views already do; only the Lesson/scheduling
+    subsystem has the full ports/repository treatment in this
+    codebase, and this isn't part of that subsystem.
+- Replaced `AdministratorRequiredMixin` (the sole `is_staff`-based gate)
+  with `SchoolAccessRequiredMixin` everywhere it was used in
+  `app/presentation/web/views.py`: `SchedulerListView`,
+  `SchedulerCreateView`, `SchedulerUpdateView`, `SchedulerDeleteView`
+  (and therefore every Teacher/Room/Subject/StudentGroup/AcademicYear/
+  Period/Lesson CRUD view built on them), `GeneratePlannedSubstitutionsView`,
+  `StaffScheduleView`, `TeacherSubstitutionView`.
+- Added `ChooseSchoolView` (`views.py`) — GET lists only the requesting
+  user's own memberships (never `School.objects.all()`); POST validates
+  the submitted `school_id` via `CurrentSchoolService.set_current()`
+  and redirects to `schedule` on success or re-renders with a 400 and
+  an error message on failure (foreign or nonexistent id). Also
+  degrades sensibly on direct navigation with zero or exactly one
+  membership.
+- Added URL `choose-school/` → `ChooseSchoolView` in
+  `app/presentation/web/urls.py`.
+- Added two minimal templates:
+  `scheduler/choose_school.html` (a school-per-radio-button form) and
+  `scheduler/no_school_access.html` (a short explanatory page).
+- Updated `tests/integration/test_web_pages.py`'s `authenticated_client`
+  fixture to also create a `School` + `SchoolMembership(PRINCIPAL)` for
+  its superuser — this fixture is used throughout that file as "the
+  administrator," and superusers no longer bypass school-membership
+  checks (by design), so it needed a membership to keep exercising the
+  same views.
+- Added `tests/conftest.py` with three small factory fixtures
+  (`make_user`, `make_school`, `make_membership`) — the first shared
+  fixture module in the test suite, justified by genuine reuse across
+  the new Phase 4A tests (and expected reuse in 4B/4C).
+- Added `tests/integration/test_current_school_access.py` (13 tests):
+  single-membership auto-selection; multi-membership redirect to
+  `choose-school`; selecting a valid membership (and that it lands in
+  the session); rejecting a school the user doesn't belong to;
+  rejecting a nonexistent school id; access stopping immediately after
+  a membership is deleted; the zero-membership "no school access"
+  response; `is_staff=True`-without-membership denied; non-staff
+  PRINCIPAL-membership allowed; superuser-without-membership denied;
+  superuser-with-membership allowed; and an explicit test that a
+  tampered/foreign session value is discarded in favor of the database
+  truth rather than trusted.
+- Verification performed:
+  - `manage.py check` → no issues.
+  - `makemigrations --check --dry-run` → no changes detected (no
+    schema change was needed for Phase 4A).
+  - Full pytest suite → 175 passed, 1 pre-existing failure unrelated to
+    this change (`test_administrator_navigation`, same failure present
+    before Phase 4A).
+- Explicitly NOT done (deferred to 4B/4C/4D, per scope): no queryset,
+  `ModelChoiceField`, or object lookup was scoped by school; `school`
+  is still a client-choosable field on the four resource forms and
+  `AcademicYearForm`; `ScheduleView`'s `is_staff` checks and all
+  `is_staff` checks in `schedule.html`/`navigation.py` are untouched;
+  Django Admin is untouched. No migration, no new `SchoolMembership`
+  role, no registration/invitation/onboarding work.
+
+### Current task
+
+Phase 4A is implemented and verified but not committed.
+
+### Next
+
+Review the diff, decide on committing, then move to Phase 4B (plain-CRUD
+query/object/form scoping).

@@ -10,6 +10,7 @@ from app.infrastructure.database.models import (
     Period,
     Room,
     School,
+    SchoolMembership,
     StudentGroup,
     Subject,
     Teacher,
@@ -20,6 +21,10 @@ from app.infrastructure.database.models import (
 def authenticated_client(client):
     user = get_user_model().objects.create_superuser(
         username="scheduler", email="scheduler@example.com", password="test-password"
+    )
+    school = School.objects.create(name="Administrator School")
+    SchoolMembership.objects.create(
+        user=user, school=school, role=SchoolMembership.Role.PRINCIPAL
     )
     client.force_login(user)
     return client

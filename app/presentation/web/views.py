@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
 from django.db.models import ProtectedError
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView, View
@@ -42,13 +42,10 @@ from app.presentation.web.schedule_renderers import (
     FocusedTimetableRenderer,
     WholeSchoolTimetableRenderer,
 )
-
-
-class AdministratorRequiredMixin(LoginRequiredMixin):
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if request.user.is_authenticated and not request.user.is_staff:
-            raise PermissionDenied
-        return super().dispatch(request, *args, **kwargs)
+from app.presentation.web.school_access import (
+    CurrentSchoolService,
+    SchoolAccessRequiredMixin,
+)
 
 
 class ProtectedDeleteMixin:
@@ -66,7 +63,7 @@ class ProtectedDeleteMixin:
             return redirect(self.get_success_url())
 
 
-class SchedulerListView(AdministratorRequiredMixin, ListView):
+class SchedulerListView(SchoolAccessRequiredMixin, ListView):
     template_name = "scheduler/object_list.html"
     context_object_name = "objects"
 
@@ -90,7 +87,7 @@ class SchedulerListView(AdministratorRequiredMixin, ListView):
         return context
 
 
-class SchedulerCreateView(AdministratorRequiredMixin, SuccessMessageMixin, CreateView):
+class SchedulerCreateView(SchoolAccessRequiredMixin, SuccessMessageMixin, CreateView):
     template_name = "scheduler/object_form.html"
     success_message = "Created successfully."
     title = ""
@@ -121,7 +118,7 @@ class SchedulerCreateView(AdministratorRequiredMixin, SuccessMessageMixin, Creat
         return context
 
 
-class SchedulerUpdateView(AdministratorRequiredMixin, SuccessMessageMixin, UpdateView):
+class SchedulerUpdateView(SchoolAccessRequiredMixin, SuccessMessageMixin, UpdateView):
     template_name = "scheduler/object_form.html"
     success_message = "Updated successfully."
     title = ""
@@ -152,7 +149,7 @@ class SchedulerUpdateView(AdministratorRequiredMixin, SuccessMessageMixin, Updat
         return context
 
 
-class SchedulerDeleteView(AdministratorRequiredMixin, ProtectedDeleteMixin, DeleteView):
+class SchedulerDeleteView(SchoolAccessRequiredMixin, ProtectedDeleteMixin, DeleteView):
     template_name = "scheduler/object_confirm_delete.html"
     title = ""
     list_url_name = ""
@@ -429,6 +426,33 @@ class LessonDeleteView(SchedulerDeleteView):
     list_url_name = "lesson-list"
 
 
+class ChooseSchoolView(LoginRequiredMixin, View):
+    """Lets a user who belongs to more than one School pick which one
+    they're currently working in. Only ever offers the schools the
+    user actually has a PRINCIPAL SchoolMembership for."""
+
+    template_name = "scheduler/choose_school.html"
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        memberships = CurrentSchoolService.memberships_for(request.user)
+        if not memberships:
+            return render(request, "scheduler/no_school_access.html", status=403)
+        if len(memberships) == 1:
+            CurrentSchoolService.set_current(request, memberships[0].school_id)
+            return redirect("schedule")
+        return render(request, self.template_name, {"memberships": memberships})
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        school = CurrentSchoolService.set_current(request, request.POST.get("school_id"))
+        if school is None:
+            memberships = CurrentSchoolService.memberships_for(request.user)
+            messages.error(request, "Choose one of the schools you belong to.")
+            return render(
+                request, self.template_name, {"memberships": memberships}, status=400
+            )
+        return redirect("schedule")
+
+
 @dataclass(frozen=True)
 class ScheduleViewChoice:
     value: str
@@ -611,7 +635,7 @@ class ScheduleView(TemplateView):
         return context
 
 
-class GeneratePlannedSubstitutionsView(AdministratorRequiredMixin, View):
+class GeneratePlannedSubstitutionsView(SchoolAccessRequiredMixin, View):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         academic_year_id = request.POST.get("academic_year", "")
         if academic_year_id.isdigit():
@@ -632,7 +656,7 @@ class GeneratePlannedSubstitutionsView(AdministratorRequiredMixin, View):
         return redirect(next_url)
 
 
-class StaffScheduleView(AdministratorRequiredMixin, TemplateView):
+class StaffScheduleView(SchoolAccessRequiredMixin, TemplateView):
     template_name = "scheduler/staff_schedule.html"
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
@@ -673,7 +697,7 @@ class StaffScheduleView(AdministratorRequiredMixin, TemplateView):
         return context
 
 
-class TeacherSubstitutionView(AdministratorRequiredMixin, TemplateView):
+class TeacherSubstitutionView(SchoolAccessRequiredMixin, TemplateView):
     template_name = "scheduler/teacher_substitution.html"
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
