@@ -731,7 +731,7 @@ class StaffScheduleView(SchoolAccessRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        academic_years = AcademicYear.objects.all()
+        academic_years = AcademicYear.objects.filter(school=self.current_school)
         academic_year_id = self.request.GET.get("academic_year", "")
         academic_year = (
             academic_years.filter(pk=int(academic_year_id)).first()

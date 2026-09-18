@@ -95,3 +95,53 @@ def test_generate_planned_substitutions_still_works_for_current_school(
     assert response.status_code == 302
     refetched = Lesson.objects.get(pk=lesson_a.pk)
     assert refetched.planned_substitute_id is not None
+
+
+# --- 4C-3: StaffScheduleView ------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_staff_schedule_shows_current_school_data(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    year_a, period_a, lesson_a = _make_lesson(client_a.school, teacher_name="Ada A")
+
+    response = client_a.get(
+        reverse("staff-schedule"),
+        {"academic_year": year_a.pk, "day": "MONDAY", "period": period_a.pk},
+    )
+
+    assert response.status_code == 200
+    assert response.context["staff_schedule"] is not None
+    assert response.context["selected_slot"] is not None
+    assert b"Ada A" in response.content
+
+
+@pytest.mark.django_db
+def test_staff_schedule_rejects_another_schools_academic_year(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    year_b, period_b, lesson_b = _make_lesson(client_b.school, teacher_name="Bob B")
+
+    response = client_a.get(reverse("staff-schedule"), {"academic_year": year_b.pk})
+
+    assert response.status_code == 200
+    assert response.context["staff_schedule"] is None
+    assert response.context["selected_academic_year"] == ""
+    assert b"Bob B" not in response.content
+
+
+@pytest.mark.django_db
+def test_staff_schedule_defaults_to_current_schools_academic_year(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    year_a, period_a, lesson_a = _make_lesson(client_a.school, teacher_name="Ada A")
+    _make_lesson(client_b.school, teacher_name="Bob B")
+
+    response = client_a.get(
+        reverse("staff-schedule"), {"day": "MONDAY", "period": period_a.pk}
+    )
+
+    assert response.status_code == 200
+    assert response.context["selected_academic_year"] == str(year_a.pk)
+    assert b"Ada A" in response.content
+    assert b"Bob B" not in response.content
