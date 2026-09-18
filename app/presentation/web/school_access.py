@@ -35,8 +35,12 @@ class CurrentSchoolService:
     @classmethod
     def resolve(cls, request: HttpRequest) -> School | None:
         """Return the user's current School, or None if it cannot be
-        determined without asking them (no membership at all, or
-        several memberships with nothing validly selected yet)."""
+        determined without asking them (not authenticated, no
+        membership at all, or several memberships with nothing validly
+        selected yet)."""
+        if not request.user.is_authenticated:
+            return None
+
         memberships = cls.memberships_for(request.user)
 
         selected_id = request.session.get(CURRENT_SCHOOL_SESSION_KEY)
