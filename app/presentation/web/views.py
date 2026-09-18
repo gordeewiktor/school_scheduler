@@ -703,7 +703,12 @@ class ScheduleView(TemplateView):
 class GeneratePlannedSubstitutionsView(SchoolAccessRequiredMixin, View):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         academic_year_id = request.POST.get("academic_year", "")
-        if academic_year_id.isdigit():
+        # Never trust a POSTed academic_year id: this mutates every
+        # Lesson in that academic year's planned_substitute, so it must
+        # belong to the current school, not merely be a valid id.
+        if academic_year_id.isdigit() and AcademicYear.objects.filter(
+            pk=academic_year_id, school=self.current_school
+        ).exists():
             build_substitution_service().generate_planned_substitutions(
                 int(academic_year_id)
             )
