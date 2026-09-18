@@ -1,7 +1,10 @@
 from datetime import time
 
+import pytest
+
 from app.application.ports.repositories import ScheduledLesson
 from app.application.services.substitution_service import SubstitutionService
+from app.domain.exceptions import SchoolAuthorizationError
 from app.domain.models import Day, Period, PeriodKind, Teacher
 
 
@@ -335,6 +338,49 @@ def test_generate_planned_substitutions_excludes_regular_teacher():
     ]
 
     repository = FakeLessonRepository(lessons=lessons, teachers=teachers)
+    plan = SubstitutionService(repository).generate_planned_substitutions(1)
+
+    assert [assignment.substitute.id for assignment in plan] == [2]
+
+
+def test_generate_planned_substitutions_rejects_mismatched_school_id():
+    teachers = [Teacher(id=1, name="Ada"), Teacher(id=2, name="Grace")]
+    lessons = [scheduled(1, teacher_id=1, day=Day.MONDAY, order=1)]
+    repository = FakeLessonRepository(
+        lessons=lessons,
+        teachers=teachers,
+        academic_year_schools={1: 100},
+    )
+
+    with pytest.raises(SchoolAuthorizationError):
+        SubstitutionService(repository).generate_planned_substitutions(1, school_id=200)
+
+    assert repository.planned_substitutes == {}
+
+
+def test_generate_planned_substitutions_accepts_matching_school_id():
+    teachers = [Teacher(id=1, name="Ada"), Teacher(id=2, name="Grace")]
+    lessons = [scheduled(1, teacher_id=1, day=Day.MONDAY, order=1)]
+    repository = FakeLessonRepository(
+        lessons=lessons,
+        teachers=teachers,
+        academic_year_schools={1: 100},
+    )
+
+    plan = SubstitutionService(repository).generate_planned_substitutions(1, school_id=100)
+
+    assert [assignment.substitute.id for assignment in plan] == [2]
+
+
+def test_generate_planned_substitutions_skips_check_when_school_id_omitted():
+    teachers = [Teacher(id=1, name="Ada"), Teacher(id=2, name="Grace")]
+    lessons = [scheduled(1, teacher_id=1, day=Day.MONDAY, order=1)]
+    repository = FakeLessonRepository(
+        lessons=lessons,
+        teachers=teachers,
+        academic_year_schools={1: 100},
+    )
+
     plan = SubstitutionService(repository).generate_planned_substitutions(1)
 
     assert [assignment.substitute.id for assignment in plan] == [2]

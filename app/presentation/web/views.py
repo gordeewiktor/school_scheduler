@@ -17,6 +17,7 @@ from app.domain.exceptions import (
     CrossSchoolLessonError,
     InvalidLessonPlacementError,
     ScheduleConflictError,
+    SchoolAuthorizationError,
 )
 from app.domain.models import Day, Lesson as DomainLesson
 from app.infrastructure.database.models import (
@@ -721,14 +722,20 @@ class GeneratePlannedSubstitutionsView(SchoolAccessRequiredMixin, View):
         academic_year_id = request.POST.get("academic_year", "")
         # Never trust a POSTed academic_year id: this mutates every
         # Lesson in that academic year's planned_substitute, so it must
-        # belong to the current school, not merely be a valid id.
+        # belong to the current school, not merely be a valid id. The
+        # service-level school_id below is a defense-in-depth backstop,
+        # not a substitute for this check.
         if academic_year_id.isdigit() and AcademicYear.objects.filter(
             pk=academic_year_id, school=self.current_school
         ).exists():
-            build_substitution_service().generate_planned_substitutions(
-                int(academic_year_id)
-            )
-            messages.success(request, "Planned substitutions generated.")
+            try:
+                build_substitution_service().generate_planned_substitutions(
+                    int(academic_year_id), school_id=self.current_school.id
+                )
+            except SchoolAuthorizationError:
+                messages.error(request, "Choose an academic year before generating substitutions.")
+            else:
+                messages.success(request, "Planned substitutions generated.")
         else:
             messages.error(request, "Choose an academic year before generating substitutions.")
 

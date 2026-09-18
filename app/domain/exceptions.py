@@ -22,6 +22,16 @@ class CrossSchoolLessonError(DomainError):
     """Raised when a lesson's resources do not all belong to one school."""
 
 
+class SchoolAuthorizationError(DomainError):
+    """Raised when a caller-supplied school does not own the data an
+    operation was asked to act on.
+
+    Distinct from CrossSchoolLessonError: that guard checks whether a
+    lesson's own components agree with *each other*; this one checks
+    whether the caller is even entitled to the school they agree on.
+    """
+
+
 class ScheduleConflictError(DomainError):
     """Raised when a lesson would conflict with an existing lesson."""
 

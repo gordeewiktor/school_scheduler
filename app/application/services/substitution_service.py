@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from app.domain.exceptions import SchoolAuthorizationError
 from app.domain.models import Day, Teacher
 from app.application.ports.repositories import (
     LessonRepository,
@@ -81,7 +82,19 @@ class SubstitutionService:
     def generate_planned_substitutions(
         self,
         academic_year_id: int,
+        school_id: int | None = None,
     ) -> list[SubstitutionAssignment]:
+        """Regenerate every planned substitute in an academic year.
+
+        `school_id`, when given, must match the academic year's own
+        school or SchoolAuthorizationError is raised — a narrow,
+        defense-in-depth check for this method specifically, since it
+        bulk-mutates every Lesson.planned_substitute in the academic
+        year. The presentation layer is still the primary boundary
+        (see GeneratePlannedSubstitutionsView); this guard only
+        protects a caller that reaches this method without going
+        through it.
+        """
         lessons = sorted(
             self.lesson_repository.list_lessons(academic_year_id),
             key=lambda lesson: (
@@ -90,8 +103,12 @@ class SubstitutionService:
                 lesson.id,
             ),
         )
-        school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
-        teachers = self.lesson_repository.list_teachers(school_id)
+        actual_school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
+        if school_id is not None and actual_school_id != school_id:
+            raise SchoolAuthorizationError(
+                "This academic year does not belong to the given school."
+            )
+        teachers = self.lesson_repository.list_teachers(actual_school_id)
         teaching_by_period: dict[tuple[Day, int], set[int]] = {}
         substitutes_by_period: dict[tuple[Day, int], set[int]] = {}
         substitution_counts: dict[int, int] = {}
