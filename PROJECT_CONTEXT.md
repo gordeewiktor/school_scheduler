@@ -471,9 +471,12 @@ Principal/membership.
 
 **Phase 4B implemented this for all CRUD operations** on Teacher, Room,
 Subject, StudentGroup, AcademicYear, Period, and Lesson — see §14 for
-the mechanism. `ScheduleView`, `StaffScheduleView`,
-`TeacherSubstitutionView`, and `GeneratePlannedSubstitutionsView`
-remain unscoped; that is Phase 4C.
+the mechanism.
+
+**Phase 4C implemented this for the scheduling subsystem**:
+`ScheduleView` (for authenticated users with a resolvable current
+school — see below), `StaffScheduleView`, `TeacherSubstitutionForm`/
+`TeacherSubstitutionView`, and `GeneratePlannedSubstitutionsView`.
 
 ---
 
@@ -581,6 +584,64 @@ added are untouched — that is Phase 4C.
   `ModelChoiceField` rejects it first, as a field-level "select a valid
   choice" error) — it remains a defense-in-depth safety net for any
   future caller that bypasses the form.
+
+**Phase 4C implementation** (`app/presentation/web/views.py`,
+`app/presentation/web/forms.py`, `app/presentation/web/school_access.py`,
+`app/domain/exceptions.py`, `app/application/services/substitution_service.py`):
+closes the scheduling-subsystem gaps Phase 4B deliberately left open.
+No repository or `ScheduleService`/`ConflictService` change was needed
+— every fix is presentation-layer, using the same direct-ORM scoping
+pattern as Phase 4B, plus one narrow service-layer guard.
+
+- **`GeneratePlannedSubstitutionsView`** — the POSTed `academic_year`
+  id was trusted outright, letting a principal trigger a bulk
+  `planned_substitute` mutation on another school's lessons (the
+  highest-severity finding: authorization was completely absent even
+  though Phase 3 already guaranteed the *teacher pool* used would
+  correctly be that other school's own). Fixed by validating
+  `AcademicYear.objects.filter(pk=..., school=self.current_school).exists()`
+  before calling the service.
+- **`StaffScheduleView`** — `academic_years = AcademicYear.objects.all()`
+  was unscoped; a principal could view another school's entire staff
+  schedule by `academic_year` id. Scoped to `self.current_school`;
+  everything downstream (the `period`/`day` detail lookup) becomes safe
+  automatically since it only operates on an already-scoped academic
+  year. This view had no tests before Phase 4C.
+- **`TeacherSubstitutionForm`** — `academic_year`/`period` were
+  unscoped `ModelChoiceField`s (unlike `PeriodForm`/`LessonForm`, which
+  Phase 4B already fixed). Given the same `school=None` fail-closed
+  treatment; `TeacherSubstitutionView` now passes
+  `school=self.current_school`. (Inspection also found this view has no
+  POST/mutation path at all — it only shows which teachers are free for
+  a given day/period; the risk was read-side disclosure, not mutation.)
+- **`ScheduleView`** — `academic_years` and the teacher/room/
+  student_group selector were fully unscoped, letting a logged-in
+  principal view another school's whole timetable or per-resource
+  schedule by id. This view is deliberately public (anonymous timetable
+  viewing predates multi-school and is intentionally preserved — see
+  §25), so the fix only applies *when a current school is resolvable*:
+  `CurrentSchoolService.resolve(request)` is called directly (not via
+  `SchoolAccessRequiredMixin`, which would incorrectly force login);
+  anonymous visitors and authenticated users with no resolvable current
+  school keep exactly today's global behaviour. `CurrentSchoolService.resolve()`
+  gained an explicit `is_authenticated` guard as a prerequisite — every
+  prior caller only ever invoked it post-login, so filtering
+  `SchoolMembership` by an `AnonymousUser` had never been exercised and
+  would have raised `ValueError`.
+- **Narrow service-layer defense-in-depth** — a new `SchoolAuthorizationError`
+  (`app/domain/exceptions.py`), distinct from `CrossSchoolLessonError`:
+  the latter checks whether a lesson's components agree with *each
+  other*, the former checks whether the *caller* is entitled to the
+  school they agree on. Added only to
+  `SubstitutionService.generate_planned_substitutions()` (an optional
+  `school_id` parameter, validated against the academic year's actual
+  school via the existing `get_academic_year_school_id()`) — the one
+  method identified as bulk-mutating `Lesson.planned_substitute`
+  directly from a view. `generate_plan()` is not reachable from any
+  view and was deliberately left alone rather than guarded
+  speculatively. The presentation-layer checks above remain the
+  primary boundary; this is a backstop for a caller that reaches the
+  service without going through them.
 
 ---
 
@@ -914,6 +975,17 @@ decided later.
 
 Do not prematurely build the public timetable system.
 
+**Phase 4C explicitly preserved today's interim behavior rather than
+deciding this**: `ScheduleView` remains reachable by anyone, unscoped,
+via `academic_year`/`teacher`/`room`/`student_group` query parameters —
+exactly as it worked before multi-school. Phase 4C only added school
+scoping for the *authenticated-principal* path (closing a real
+cross-tenant disclosure for logged-in users), and treated this as
+current-school authorization, not as a confidentiality boundary for
+the public timetable. The open question above — what a real public
+timetable's URL/access model should be — is unresolved and unrelated to
+that fix.
+
 ---
 
 # 26. Authentication Flow — Intended Future
@@ -1165,22 +1237,25 @@ forms' `Meta.fields`), and `ModelChoiceField` scoping for `PeriodForm`
 and `LessonForm`, for all seven CRUD resources (Teacher, Room, Subject,
 StudentGroup, AcademicYear, Period, Lesson). No migration was needed.
 
-Phase 4B deliberately stops at the plain-CRUD views. `ScheduleView`,
-`StaffScheduleView`, `TeacherSubstitutionView`/`TeacherSubstitutionForm`,
-and `GeneratePlannedSubstitutionsView` are untouched and remain fully
-unscoped — a user can still view or act on another school's timetable/
-substitution data through those pages by manipulating query parameters.
-`DjangoLessonRepository`/`ScheduleService`/`SubstitutionService`/
-`ConflictService` were not changed beyond what Phase 3 already added.
+**Phase 4C (scheduling subsystem school isolation) is implemented**
+(see §13–§14): `GeneratePlannedSubstitutionsView`, `StaffScheduleView`,
+`TeacherSubstitutionForm`/`TeacherSubstitutionView`, and `ScheduleView`
+(for authenticated users with a resolvable current school) are all
+scoped. `ScheduleView`'s pre-existing public/anonymous timetable
+viewing is deliberately unchanged — see §25. A narrow, defense-in-depth
+`SchoolAuthorizationError` guard was added to
+`SubstitutionService.generate_planned_substitutions()` only (the one
+directly-reachable method that bulk-mutates `Lesson.planned_substitute`);
+no other repository or service method was touched, and no migration
+was needed.
 
-The next implementation steps are:
+Phase 4C deliberately stops before the remaining `is_staff` checks in
+`schedule.html`/`navigation.py` (they still gate which view *choices*
+are shown, e.g. `whole_school`, orthogonal to the data-scoping fixed
+here) and before any Django Admin or navigation redesign — that is
+Phase 4D.
 
-    Phase 4C: thread current-school context through the Lesson/
-    ScheduleService/SubstitutionService/ConflictService/
-    DjangoLessonRepository subsystem, closing the ScheduleView/
-    StaffScheduleView/TeacherSubstitutionView/
-    GeneratePlannedSubstitutionsView cross-tenant disclosure found
-    during the Phase 4 inspection.
+The next implementation step is:
 
     Phase 4D: remaining `is_staff` cleanup in templates/navigation,
     full regression/IDOR audit sweep, documentation.

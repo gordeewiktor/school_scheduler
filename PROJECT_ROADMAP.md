@@ -371,19 +371,69 @@ ModelChoiceFields must not expose objects belonging to another school.
   the CRUD path — `LessonForm`'s scoped fields mean a foreign id is
   now rejected earlier, as a field-level "select a valid choice" error.
 
-## Phase 4C — Lesson/scheduling subsystem scoping (not started)
+## Phase 4C — Lesson/scheduling subsystem scoping (done)
 
-- [ ] Lesson queries scoped through AcademicYear/School.
-- [ ] Substitute-teacher queries scoped by School.
-- [ ] Schedule queries scoped by School.
-- [ ] `ScheduleView`/`StaffScheduleView`/`TeacherSubstitutionView`/
+- [x] Schedule queries scoped by School (`ScheduleView`, for
+      authenticated users with a resolvable current school;
+      `StaffScheduleView`, always).
+- [x] Substitute-teacher queries scoped by School
+      (`TeacherSubstitutionForm`).
+- [x] `ScheduleView`/`StaffScheduleView`/`TeacherSubstitutionView`/
       `GeneratePlannedSubstitutionsView` validate any user-suppliable
       `academic_year`/resource id against the current school (closes
       the cross-tenant timetable disclosure found during the Phase 4
       inspection).
-- [ ] `DjangoLessonRepository`/`ScheduleService`/`SubstitutionService`/
-      `ConflictService` reject a school/academic-year mismatch
-      independent of the view layer.
+- [x] A narrow defense-in-depth guard was added at the application-service
+      layer for the one directly-reachable, bulk-mutating method
+      (`SubstitutionService.generate_planned_substitutions()`) — not a
+      blanket `DjangoLessonRepository`/`ScheduleService`/`ConflictService`
+      change; those were deliberately left as Phase 3 left them (see
+      implementation notes below for why).
+- [ ] Lesson queries scoped through AcademicYear/School — not needed:
+      inspection found no view/form reachable in Phase 4C that queries
+      `Lesson` by an untrusted id outside what `LessonListView`/
+      `LessonUpdateView`/`LessonDeleteView` (Phase 4B) already cover.
+
+### Implementation notes
+
+- **`GeneratePlannedSubstitutionsView`** (highest severity — bulk
+  mutation): the POSTed `academic_year` id was trusted outright.
+  Fixed with `AcademicYear.objects.filter(pk=..., school=self.current_school).exists()`
+  before calling the service.
+- **`StaffScheduleView`**: `academic_years = AcademicYear.objects.all()` →
+  `.filter(school=self.current_school)`. This view had no tests at all
+  before Phase 4C; its first tests were written here.
+- **`TeacherSubstitutionForm`**: given the same `school=None` fail-closed
+  treatment Phase 4B applied to `PeriodForm`/`LessonForm` — it was the
+  one CRUD-adjacent form Phase 4B explicitly left alone. Inspection
+  also corrected an assumption from the Phase 4C planning prompt: this
+  view has no POST/lesson-assignment flow at all, only a read-only
+  "who's free" GET lookup — the risk was disclosure, not mutation.
+- **`ScheduleView`**: the trickiest one, because it's deliberately
+  public. Resolved via `CurrentSchoolService.resolve(request)` called
+  directly (not through `SchoolAccessRequiredMixin`, which would force
+  login) — scoping `academic_years` and the teacher/room/student_group
+  selector only when a current school comes back non-`None`; anonymous
+  visitors and authenticated no-membership users keep today's global
+  behaviour, confirmed unchanged by the existing `test_public_user_*`
+  tests. This is treated as an authentication-boundary decision, not a
+  redesign of the (still-undecided) public timetable feature — see
+  `PROJECT_CONTEXT.md` §25.
+- **Anonymous-safety prerequisite**: `CurrentSchoolService.resolve()`
+  had never been called for an unauthenticated user before (every
+  existing caller was behind `SchoolAccessRequiredMixin`); doing so
+  would have raised `ValueError` filtering `SchoolMembership` by an
+  `AnonymousUser`. Fixed first, as its own commit, before touching
+  `ScheduleView`.
+- **`SchoolAuthorizationError`** (new, `app/domain/exceptions.py`):
+  deliberately a sibling of `CrossSchoolLessonError`, not a subclass —
+  the two check different things (caller entitlement vs. internal
+  lesson consistency) and conflating their names would blur that
+  distinction. Added only to
+  `SubstitutionService.generate_planned_substitutions()` via an
+  optional `school_id` parameter; `generate_plan()` is not reachable
+  from any view and was deliberately left unguarded rather than
+  extended speculatively.
 
 ## Phase 4D — Cleanup and full audit (not started)
 
@@ -670,23 +720,21 @@ Implement the next small architectural step toward multi-school support.
 
 ## Current status
 
-Phases 1–3 (School/SchoolMembership foundation, AcademicYear ownership,
-Teacher/Room/Subject/StudentGroup ownership) and Phase 4A
-(current-school/membership-access foundation) are implemented,
-verified, and committed. Phase 4B (CRUD school data isolation) is
-implemented and verified, and not yet committed. The existing
-"principal" user still has not been attached to a school —
+Phases 1–3, Phase 4A (current-school/membership-access foundation),
+Phase 4B (CRUD school data isolation), and Phase 4C (scheduling
+subsystem school isolation) are all implemented, verified, and
+committed (Phase 4C as 6 separate commits, one per logical step). The
+existing "principal" user still has not been attached to a school —
 `create_school` remains written but intentionally not run. The real dev
 database is migrated through `0012`; no migration was needed for
-Phase 4A or Phase 4B.
+Phase 4A, 4B, or 4C.
 
 ## Immediate next step
 
-1. Review the diff for the Phase 4B slice.
-2. Decide whether/when to run `create_school` against the dev database.
-3. Commit.
-4. Move to Phase 4C (Lesson/scheduling subsystem scoping — see the
-   Phase 4 section above).
+1. Decide whether/when to run `create_school` against the dev database.
+2. Move to Phase 4D (remaining `is_staff` cleanup in templates/
+   navigation, full regression/IDOR audit sweep — see the Phase 4
+   section above).
 
 ---
 
@@ -1129,9 +1177,103 @@ Move to Phase 4B (plain-CRUD query/object/form scoping).
 
 ### Current task
 
-Phase 4B is implemented and verified but not committed.
+Phase 4B was implemented and verified, and has since been committed
+(`e030c25`).
 
 ### Next
 
-Review the diff, decide on committing, then move to Phase 4C
-(Lesson/scheduling subsystem scoping).
+Move to Phase 4C (Lesson/scheduling subsystem scoping).
+
+## 2026-09-21 — Phase 4C: Scheduling subsystem school isolation
+
+### Completed
+
+Implemented in the approved order, one commit per logical step, running
+the relevant tests plus a full regression pass after each:
+
+- **4C-1** (`b77df94`) — `CurrentSchoolService.resolve()` now returns
+  `None` immediately for an unauthenticated user, instead of raising
+  `ValueError` when filtering `SchoolMembership` by an `AnonymousUser`.
+  Prerequisite for 4C-2 (`ScheduleView` is the first caller that can be
+  anonymous).
+- **4C-5** (`0ced268`) — `GeneratePlannedSubstitutionsView` now
+  validates the POSTed `academic_year` id belongs to
+  `self.current_school` before calling the service. Previously any
+  authenticated principal could trigger a bulk `planned_substitute`
+  mutation on another school's lessons — the highest-severity finding
+  from the Phase 4C inspection. Done first (out of dependency order)
+  because it was the highest-severity, fully independent fix.
+- **4C-3** (`984b6a9`) — `StaffScheduleView`'s `academic_years` scoped
+  to `self.current_school`. This view had no tests before Phase 4C;
+  wrote its first ones here.
+- **4C-4** (`a482d8d`) — `TeacherSubstitutionForm` gained the same
+  `school=None` fail-closed treatment Phase 4B gave `PeriodForm`/
+  `LessonForm`; `TeacherSubstitutionView` passes `school=self.current_school`.
+  Inspection corrected an assumption going in: this view has no POST/
+  lesson-assignment flow, only a read-only "available teachers" GET
+  lookup — the risk was disclosure, not mutation.
+- **4C-2** (`4ee3e7e`) — `ScheduleView`'s `academic_years` and the
+  teacher/room/student_group selector scoped, but only when
+  `CurrentSchoolService.resolve(request)` returns a school (called
+  directly, not via `SchoolAccessRequiredMixin`, which would force
+  login and break the public path). Anonymous visitors and
+  authenticated users with no resolvable current school keep exactly
+  today's global behaviour — confirmed by the existing
+  `test_public_user_can_access_focused_schedule`/
+  `test_public_user_can_access_student_group_and_room_schedules`/
+  `test_public_user_cannot_access_whole_school_schedule` passing
+  unchanged. Also fixed 3 existing tests
+  (`test_schedule_uses_period_columns_and_breaks`,
+  `test_schedule_defaults_to_latest_academic_year`,
+  `test_teacher_view_only_exposes_teacher_selector`) that created an
+  ad-hoc School unrelated to `authenticated_client.school` — the same
+  fixture pattern Phase 4B had to fix for the CRUD views.
+- **4C-6** (`3fba043`) — added `SchoolAuthorizationError`
+  (`app/domain/exceptions.py`), a sibling of `CrossSchoolLessonError`
+  rather than a subclass (different concern: caller entitlement vs.
+  internal lesson consistency). Added an optional `school_id`
+  parameter to `SubstitutionService.generate_planned_substitutions()`
+  only — the one method reachable from a view that bulk-mutates
+  `Lesson.planned_substitute` — validated against
+  `get_academic_year_school_id()` (already existed from Phase 3).
+  `generate_plan()` is not reachable from any view and was deliberately
+  left unguarded. `GeneratePlannedSubstitutionsView` now passes
+  `school_id=self.current_school.id` and treats
+  `SchoolAuthorizationError` as a safety net, not the primary check
+  (4C-5's view-layer check already prevents it from firing in normal
+  operation).
+- **4C-7** — regression/cleanup, folded into each step above rather
+  than saved for the end, plus a final full-suite pass.
+
+No changes to `DjangoLessonRepository`, `app/application/ports/repositories.py`,
+`ScheduleService`, `ConflictService`, `SchoolMembership`, URLs,
+templates, navigation, or Django Admin — confirmed via
+`git diff --stat e030c25..HEAD` after every commit.
+
+New test file `tests/integration/test_scheduling_school_isolation.py`
+(19 tests) covers: same-school access works, cross-school read is
+blocked (empty/degraded state, never the other school's data),
+cross-school mutation is blocked (verified via a fresh DB query, not
+the response), and foreign/nonexistent ids fail closed, for all four
+views/forms. `tests/application/test_substitution_service.py` gained 3
+tests for the new service-level guard (rejects mismatch, accepts
+match, skips the check when `school_id` is omitted).
+
+Verification performed after the final commit:
+- `manage.py check` → no issues.
+- `makemigrations --check --dry-run` → no changes detected (no schema
+  change was needed).
+- Full pytest suite → 254 passed, 1 pre-existing failure unrelated to
+  this change (`test_administrator_navigation`, same failure present
+  before Phase 4C).
+- `git diff --stat e030c25..HEAD` reviewed: 8 files changed, all within
+  the approved scope.
+
+### Current task
+
+Phase 4C is implemented, verified, and committed.
+
+### Next
+
+Move to Phase 4D (remaining `is_staff` cleanup in templates/navigation,
+full regression/IDOR audit sweep, documentation).
