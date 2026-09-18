@@ -39,30 +39,38 @@ class AcademicYearAdmin(admin.ModelAdmin):
 
 @admin.register(Teacher)
 class TeacherAdmin(admin.ModelAdmin):
-    list_display = ["name", "email"]
-    search_fields = ["name", "email"]
-    ordering = ["name"]
+    list_display = ["name", "email", "school"]
+    list_filter = ["school"]
+    search_fields = ["name", "email", "school__name"]
+    list_select_related = ["school"]
+    ordering = ["school", "name"]
 
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ["name", "capacity"]
-    search_fields = ["name"]
-    ordering = ["name"]
+    list_display = ["name", "capacity", "school"]
+    list_filter = ["school"]
+    search_fields = ["name", "school__name"]
+    list_select_related = ["school"]
+    ordering = ["school", "name"]
 
 
 @admin.register(Subject)
 class SubjectAdmin(admin.ModelAdmin):
-    list_display = ["name", "code"]
-    search_fields = ["name", "code"]
-    ordering = ["name"]
+    list_display = ["name", "code", "school"]
+    list_filter = ["school"]
+    search_fields = ["name", "code", "school__name"]
+    list_select_related = ["school"]
+    ordering = ["school", "name"]
 
 
 @admin.register(StudentGroup)
 class StudentGroupAdmin(admin.ModelAdmin):
-    list_display = ["name", "size"]
-    search_fields = ["name"]
-    ordering = ["name"]
+    list_display = ["name", "size", "school"]
+    list_filter = ["school"]
+    search_fields = ["name", "school__name"]
+    list_select_related = ["school"]
+    ordering = ["school", "name"]
 
 
 @admin.register(Period)

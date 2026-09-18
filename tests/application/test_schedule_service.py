@@ -2,12 +2,24 @@ from datetime import time
 
 import pytest
 
-from app.application.ports.repositories import ScheduledLesson
+from app.application.ports.repositories import ResourceSchoolIds, ScheduledLesson
 from app.application.services.conflicts import ConflictService
 from app.application.services.schedules import ScheduleService
-from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
+from app.domain.exceptions import (
+    CrossSchoolLessonError,
+    InvalidLessonPlacementError,
+    ScheduleConflictError,
+)
 from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import ExistingLesson
+
+SAME_SCHOOL_IDS = ResourceSchoolIds(
+    teacher_school_id=1,
+    room_school_id=1,
+    subject_school_id=1,
+    student_group_school_id=1,
+    period_school_id=1,
+)
 
 
 def make_period(order, kind=PeriodKind.LESSON):
@@ -30,16 +42,32 @@ def scheduled(lesson_id, day=Day.MONDAY, order=1, teacher_id=1, room_id=1, group
 
 
 class FakeLessonRepository:
-    def __init__(self, periods=None, conflicts=None, lessons=None, teachers=None):
+    def __init__(
+        self,
+        periods=None,
+        conflicts=None,
+        lessons=None,
+        teachers=None,
+        resource_school_ids=None,
+    ):
         self.periods = periods or [make_period(1), make_period(2), make_period(3)]
         self.conflicts = conflicts or []
         self.lessons = lessons or []
         self.teachers = teachers or []
+        self.resource_school_ids = resource_school_ids or SAME_SCHOOL_IDS
         self.created = []
         self.updated = []
 
-    def list_teachers(self):
+    def list_teachers(self, school_id):
         return self.teachers
+
+    def get_academic_year_school_id(self, academic_year_id):
+        return 1
+
+    def get_resource_school_ids(
+        self, *, teacher_id, room_id, subject_id, student_group_id, period_id
+    ):
+        return self.resource_school_ids
 
     def get_period(self, period_id):
         return next((period for period in self.periods if period.id == period_id), None)
@@ -122,6 +150,36 @@ def test_service_rejects_unknown_period():
     repository = FakeLessonRepository([make_period(1)])
     with pytest.raises(InvalidLessonPlacementError, match="configured period"):
         build_service(repository).create_lesson(command(start_period_id=2))
+
+
+def test_service_rejects_lesson_with_resources_from_different_schools():
+    repository = FakeLessonRepository(
+        resource_school_ids=ResourceSchoolIds(
+            teacher_school_id=1,
+            room_school_id=2,
+            subject_school_id=1,
+            student_group_school_id=1,
+            period_school_id=1,
+        )
+    )
+    with pytest.raises(CrossSchoolLessonError):
+        build_service(repository).create_lesson(command())
+    assert repository.created == []
+
+
+def test_service_update_rejects_lesson_with_resources_from_different_schools():
+    repository = FakeLessonRepository(
+        resource_school_ids=ResourceSchoolIds(
+            teacher_school_id=1,
+            room_school_id=1,
+            subject_school_id=1,
+            student_group_school_id=2,
+            period_school_id=1,
+        )
+    )
+    with pytest.raises(CrossSchoolLessonError):
+        build_service(repository).update_lesson(command(id=1))
+    assert repository.updated == []
 
 
 def test_service_rejects_conflicting_lesson():

@@ -69,23 +69,24 @@ class Command(BaseCommand):
 
         self.stdout.write("Creating academic year and periods...")
         academic_year = self._load_academic_year()
+        school = academic_year.school
         self._load_periods(academic_year)
         self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Creating teachers...")
-        self._load_teachers()
+        self._load_teachers(school)
         self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Creating student groups...")
-        self._load_student_groups()
+        self._load_student_groups(school)
         self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Creating rooms...")
-        self._load_rooms()
+        self._load_rooms(school)
         self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Creating subjects...")
-        self._load_subjects()
+        self._load_subjects(school)
         self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Generating timetable...")
@@ -145,30 +146,34 @@ class Command(BaseCommand):
                 },
             )
 
-    def _load_teachers(self) -> None:
+    def _load_teachers(self, school: School) -> None:
         for index in range(1, 81):
             Teacher.objects.update_or_create(
+                school=school,
                 name=f"Teacher {index:02d}",
                 defaults={"email": ""},
             )
 
-    def _load_student_groups(self) -> None:
+    def _load_student_groups(self, school: School) -> None:
         for index in range(1, 51):
             StudentGroup.objects.update_or_create(
+                school=school,
                 name=f"Class {index:02d}",
                 defaults={"size": None},
             )
 
-    def _load_rooms(self) -> None:
+    def _load_rooms(self, school: School) -> None:
         for index in range(1, 51):
             Room.objects.update_or_create(
+                school=school,
                 name=f"Room {index:02d}",
                 defaults={"capacity": None},
             )
 
-    def _load_subjects(self) -> None:
+    def _load_subjects(self, school: School) -> None:
         for name, code in self.SUBJECTS:
             Subject.objects.update_or_create(
+                school=school,
                 name=name,
                 defaults={"code": code},
             )
@@ -177,13 +182,14 @@ class Command(BaseCommand):
         Lesson.objects.filter(start_period__academic_year=academic_year).delete()
 
     def _generate_timetable(self, academic_year: AcademicYear):
+        school = academic_year.school
         generator = DemoTimetableGenerator(self._schedule_service())
         return generator.generate(
             academic_year_id=academic_year.id,
-            student_groups=self._demo_student_groups(),
-            rooms=self._demo_rooms(),
-            subjects=self._demo_subjects(),
-            teachers=self._demo_teachers(),
+            student_groups=self._demo_student_groups(school),
+            rooms=self._demo_rooms(school),
+            subjects=self._demo_subjects(school),
+            teachers=self._demo_teachers(school),
         )
 
     @staticmethod
@@ -196,22 +202,26 @@ class Command(BaseCommand):
         return SubstitutionService(DjangoLessonRepository())
 
     @staticmethod
-    def _demo_teachers() -> list[Teacher]:
+    def _demo_teachers(school: School) -> list[Teacher]:
         names = [f"Teacher {index:02d}" for index in range(1, 81)]
-        return list(Teacher.objects.filter(name__in=names).order_by("name"))
+        return list(
+            Teacher.objects.filter(school=school, name__in=names).order_by("name")
+        )
 
     @staticmethod
-    def _demo_student_groups() -> list[StudentGroup]:
+    def _demo_student_groups(school: School) -> list[StudentGroup]:
         names = [f"Class {index:02d}" for index in range(1, 51)]
-        return list(StudentGroup.objects.filter(name__in=names).order_by("name"))
+        return list(
+            StudentGroup.objects.filter(school=school, name__in=names).order_by("name")
+        )
 
     @staticmethod
-    def _demo_rooms() -> list[Room]:
+    def _demo_rooms(school: School) -> list[Room]:
         names = [f"Room {index:02d}" for index in range(1, 51)]
-        return list(Room.objects.filter(name__in=names).order_by("name"))
+        return list(Room.objects.filter(school=school, name__in=names).order_by("name"))
 
-    def _demo_subjects(self) -> list[Subject]:
+    def _demo_subjects(self, school: School) -> list[Subject]:
         return [
-            Subject.objects.get(name=name)
+            Subject.objects.get(school=school, name=name)
             for name, _code in self.SUBJECTS
         ]

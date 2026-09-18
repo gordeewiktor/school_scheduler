@@ -22,7 +22,8 @@ class SubstitutionService:
         period_id: int,
         excluded_teacher_id: int | None = None,
     ) -> list[Teacher]:
-        teachers = self.lesson_repository.list_teachers()
+        school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
+        teachers = self.lesson_repository.list_teachers(school_id)
         lessons = self.lesson_repository.list_lessons_starting_at(
             academic_year_id, day, period_id
         )
@@ -89,7 +90,8 @@ class SubstitutionService:
                 lesson.id,
             ),
         )
-        teachers = self.lesson_repository.list_teachers()
+        school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
+        teachers = self.lesson_repository.list_teachers(school_id)
         teaching_by_period: dict[tuple[Day, int], set[int]] = {}
         substitutes_by_period: dict[tuple[Day, int], set[int]] = {}
         substitution_counts: dict[int, int] = {}
@@ -141,7 +143,8 @@ class SubstitutionService:
             teacher_id,
             academic_year_id,
         )
-        teachers = self.lesson_repository.list_teachers()
+        school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
+        teachers = self.lesson_repository.list_teachers(school_id)
         teaching_by_period: dict[tuple[Day, int], set[int]] = {}
         for scheduled_lesson in self.lesson_repository.list_lessons(academic_year_id):
             period_key = (scheduled_lesson.day, scheduled_lesson.start_period.id)

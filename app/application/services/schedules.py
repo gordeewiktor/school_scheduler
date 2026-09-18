@@ -3,7 +3,11 @@ from dataclasses import dataclass
 
 from app.application.ports.repositories import LessonRepository, ScheduledLesson
 from app.application.services.conflicts import ConflictService
-from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
+from app.domain.exceptions import (
+    CrossSchoolLessonError,
+    InvalidLessonPlacementError,
+    ScheduleConflictError,
+)
 from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import LessonRequest
 
@@ -87,6 +91,7 @@ class ScheduleService:
             raise InvalidLessonPlacementError("Choose a configured period.")
         if not period.accepts_lessons:
             raise InvalidLessonPlacementError("Lessons cannot occupy break periods.")
+        self._ensure_same_school(lesson, period)
         return LessonRequest(
             teacher_id=lesson.teacher_id,
             room_id=lesson.room_id,
@@ -97,6 +102,27 @@ class ScheduleService:
             planned_substitute_id=lesson.planned_substitute_id,
             lesson_id=lesson.id,
         )
+
+    def _ensure_same_school(self, lesson: Lesson, period: Period) -> None:
+        school_ids = self.lesson_repository.get_resource_school_ids(
+            teacher_id=lesson.teacher_id,
+            room_id=lesson.room_id,
+            subject_id=lesson.subject_id,
+            student_group_id=lesson.student_group_id,
+            period_id=period.id,
+        )
+        distinct_schools = {
+            school_ids.teacher_school_id,
+            school_ids.room_school_id,
+            school_ids.subject_school_id,
+            school_ids.student_group_school_id,
+            school_ids.period_school_id,
+        }
+        if len(distinct_schools) > 1:
+            raise CrossSchoolLessonError(
+                "Teacher, room, subject, and student group must all belong to "
+                "the same school as the lesson's academic year."
+            )
 
     def _raise_for_conflicts(self, request: LessonRequest) -> None:
         conflicts = self.conflict_service.find_conflicts(request)
@@ -198,8 +224,9 @@ class ScheduleService:
 
     def staff_schedule(self, academic_year_id: int) -> StaffSchedule:
         periods = self.periods(academic_year_id)
+        school_id = self.lesson_repository.get_academic_year_school_id(academic_year_id)
         teachers = sorted(
-            self.lesson_repository.list_teachers(),
+            self.lesson_repository.list_teachers(school_id),
             key=lambda teacher: (teacher.name.casefold(), teacher.id),
         )
         lessons_by_slot: dict[tuple[Day, int], list[ScheduledLesson]] = {}

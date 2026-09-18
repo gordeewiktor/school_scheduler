@@ -47,13 +47,30 @@ def scheduled(
 
 
 class FakeLessonRepository:
-    def __init__(self, lessons=None, teachers=None):
+    def __init__(
+        self,
+        lessons=None,
+        teachers=None,
+        teacher_school_ids=None,
+        academic_year_schools=None,
+    ):
         self.lessons = lessons or []
         self.teachers = teachers or []
         self.planned_substitutes = {}
+        self.teacher_school_ids = teacher_school_ids or {}
+        self.academic_year_schools = academic_year_schools or {}
 
-    def list_teachers(self):
-        return self.teachers
+    def list_teachers(self, school_id):
+        if not self.teacher_school_ids:
+            return self.teachers
+        return [
+            teacher
+            for teacher in self.teachers
+            if self.teacher_school_ids.get(teacher.id) == school_id
+        ]
+
+    def get_academic_year_school_id(self, academic_year_id):
+        return self.academic_year_schools.get(academic_year_id, 1)
 
     def list_lessons(self, academic_year_id):
         return [
@@ -163,6 +180,69 @@ def test_available_teachers_excludes_teachers_already_substituting_that_period()
     result = service.available_teachers(1, Day.MONDAY, 1)
 
     assert [teacher.id for teacher in result] == [3]
+
+
+def test_available_teachers_excludes_teachers_from_another_school():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Grace"),
+        Teacher(id=3, name="Zoe"),
+    ]
+
+    repository = FakeLessonRepository(
+        teachers=teachers,
+        teacher_school_ids={1: 100, 2: 100, 3: 200},
+        academic_year_schools={1: 100},
+    )
+    service = SubstitutionService(repository)
+
+    result = service.available_teachers(1, Day.MONDAY, 1)
+
+    assert [teacher.id for teacher in result] == [1, 2]
+
+
+def test_generate_plan_excludes_teachers_from_another_school():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Zoe"),
+    ]
+    lessons = [
+        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
+    ]
+
+    repository = FakeLessonRepository(
+        lessons=lessons,
+        teachers=teachers,
+        teacher_school_ids={1: 100, 2: 200},
+        academic_year_schools={1: 100},
+    )
+    service = SubstitutionService(repository)
+
+    plan = service.generate_plan(teacher_id=1, academic_year_id=1)
+
+    assert [assignment.substitute for assignment in plan] == [None]
+
+
+def test_generate_planned_substitutions_never_assigns_a_teacher_from_another_school():
+    teachers = [
+        Teacher(id=1, name="Ada"),
+        Teacher(id=2, name="Zoe"),
+    ]
+    lessons = [
+        scheduled(1, teacher_id=1, day=Day.MONDAY, order=1),
+    ]
+
+    repository = FakeLessonRepository(
+        lessons=lessons,
+        teachers=teachers,
+        teacher_school_ids={1: 100, 2: 200},
+        academic_year_schools={1: 100},
+    )
+
+    plan = SubstitutionService(repository).generate_planned_substitutions(1)
+
+    assert [assignment.substitute for assignment in plan] == [None]
+    assert repository.planned_substitutes == {1: None}
 
 
 def test_generate_plan_breaks_ties_by_teacher_id():

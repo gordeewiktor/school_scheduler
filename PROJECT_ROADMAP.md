@@ -188,44 +188,61 @@ reusable across multiple academic years:
 
 ## Teacher
 
-- [ ] Add `school` ForeignKey.
-- [ ] Migrate existing teachers.
-- [ ] Make school relationship required.
-- [ ] Replace global name uniqueness with per-school uniqueness.
-- [ ] Update forms.
-- [ ] Update views.
-- [ ] Update repositories.
-- [ ] Add isolation tests.
+- [x] Add `school` ForeignKey.
+- [x] Migrate existing teachers.
+- [x] Make school relationship required.
+- [x] Replace global name uniqueness with per-school uniqueness.
+- [x] Update forms.
+- [x] Update views.
+- [x] Update repositories.
+- [x] Add isolation tests.
 
 ## Room
 
-- [ ] Add `school` ForeignKey.
-- [ ] Migrate existing rooms.
-- [ ] Make school relationship required.
-- [ ] Replace global name uniqueness with per-school uniqueness.
-- [ ] Update forms.
-- [ ] Update views.
-- [ ] Add isolation tests.
+- [x] Add `school` ForeignKey.
+- [x] Migrate existing rooms.
+- [x] Make school relationship required.
+- [x] Replace global name uniqueness with per-school uniqueness.
+- [x] Update forms.
+- [x] Update views.
+- [x] Add isolation tests.
 
 ## Subject
 
-- [ ] Add `school` ForeignKey.
-- [ ] Migrate existing subjects.
-- [ ] Make school relationship required.
-- [ ] Replace global name uniqueness with per-school uniqueness.
-- [ ] Update forms.
-- [ ] Update views.
-- [ ] Add isolation tests.
+- [x] Add `school` ForeignKey.
+- [x] Migrate existing subjects.
+- [x] Make school relationship required.
+- [x] Replace global name uniqueness with per-school uniqueness.
+- [x] Update forms.
+- [x] Update views.
+- [x] Add isolation tests.
 
 ## StudentGroup
 
-- [ ] Add `school` ForeignKey.
-- [ ] Migrate existing student groups.
-- [ ] Make school relationship required.
-- [ ] Replace global name uniqueness with per-school uniqueness.
-- [ ] Update forms.
-- [ ] Update views.
-- [ ] Add isolation tests.
+- [x] Add `school` ForeignKey.
+- [x] Migrate existing student groups.
+- [x] Make school relationship required.
+- [x] Replace global name uniqueness with per-school uniqueness.
+- [x] Update forms.
+- [x] Update views.
+- [x] Add isolation tests.
+
+## Notes
+
+- `Subject.code` was left untouched — it had no uniqueness constraint
+  before Phase 3 and none was added.
+- `Meta.ordering` for all four models is `["school", "name"]`.
+- Migrations: `0010_school_owned_resources_nullable` (nullable
+  `AddField` for all four models) → `0011_backfill_school_owned_resources`
+  (`RunPython`, reuses Phase 2's "Default School" by name via
+  `get_or_create` rather than creating a second one) →
+  `0012_school_owned_resources_required` (required FK + per-school
+  `UniqueConstraint` + ordering, for all four models). Applied to the
+  real `db.sqlite3`; verified 80 Teachers / 42 Rooms / 10 Subjects / 42
+  StudentGroups / 2100 Lessons preserved and all owned by the same
+  "Default School" that already owned "Demo 2026".
+- Two safeguards from later phases were pulled forward narrowly because
+  Phase 3 made them necessary — see the Phase 6 and Phase 7 notes below.
 
 ---
 
@@ -330,15 +347,24 @@ model already represents the required information.
 
 ## Lessons
 
-- [ ] Ensure lessons are accessible only within the current school.
-- [ ] Validate that the lesson's teacher belongs to the same school.
-- [ ] Validate that the lesson's room belongs to the same school.
-- [ ] Validate that the lesson's subject belongs to the same school.
-- [ ] Validate that the lesson's student group belongs to the same
+- [ ] Ensure lessons are accessible only within the current school
+      (needs Phase 4's current-school resolution; not done).
+- [x] Validate that the lesson's teacher belongs to the same school.
+- [x] Validate that the lesson's room belongs to the same school.
+- [x] Validate that the lesson's subject belongs to the same school.
+- [x] Validate that the lesson's student group belongs to the same
       school.
-- [ ] Validate that the lesson's Period belongs to the same school.
-- [ ] Prevent cross-school references.
-- [ ] Add appropriate tests.
+- [x] Validate that the lesson's Period belongs to the same school.
+- [x] Prevent cross-school references.
+- [x] Add appropriate tests.
+
+  Implemented in Phase 3 as a narrow data-integrity guard
+  (`CrossSchoolLessonError`, raised by
+  `ScheduleService._ensure_same_school()`), pulled forward because
+  giving these resources a `school` FK is what first made a
+  cross-school Lesson possible. This is not the full lesson/scheduling
+  access-control system: the Lesson form's dropdowns are still unscoped
+  and `planned_substitute` is not checked against this invariant.
 
 ## Scheduling
 
@@ -366,12 +392,23 @@ Current intended algorithm:
 
 ## Multi-school requirements
 
-- [ ] Ensure teacher pool is limited to the current school.
-- [ ] Ensure substitute assignments cannot cross schools.
-- [ ] Audit `list_teachers()`.
-- [ ] Audit `SubstitutionService`.
-- [ ] Audit substitution-related repository methods.
-- [ ] Add two-school isolation tests.
+- [x] Ensure teacher pool is limited to the current school.
+- [x] Ensure substitute assignments cannot cross schools.
+- [x] Audit `list_teachers()`.
+- [x] Audit `SubstitutionService`.
+- [x] Audit substitution-related repository methods.
+- [x] Add two-school isolation tests.
+
+  Implemented in Phase 3: `list_teachers()` now requires a `school_id`
+  and only returns that school's teachers; `SubstitutionService`
+  (`available_teachers`, `generate_planned_substitutions`,
+  `generate_plan`) and `ScheduleService.staff_schedule` resolve the
+  school from the `academic_year_id` they already receive via a new
+  `get_academic_year_school_id()` repository method, so their own
+  public signatures didn't need to change. This is a repository/service
+  *contract* change, not the full Phase 4 authorization system — there
+  is still no current-school resolution, so a caller could still pass
+  an arbitrary `academic_year_id`.
 
 ---
 
@@ -546,21 +583,22 @@ Implement the next small architectural step toward multi-school support.
 
 ## Current status
 
-Phase 1 (School/SchoolMembership foundation) and Phase 2 (AcademicYear
-→ School ownership) have both been implemented and verified. Neither
-slice has been committed yet. The existing "principal" user still has
-not been attached to a school — `create_school` remains written but
-intentionally not run. The real dev database has been migrated through
-`0009`; its one existing AcademicYear ("Demo 2026") is now owned by an
-auto-created "Default School".
+Phase 1 (School/SchoolMembership foundation), Phase 2 (AcademicYear →
+School ownership), and Phase 3 (Teacher/Room/Subject/StudentGroup →
+School ownership) have all been implemented and verified. None of the
+three slices has been committed yet. The existing "principal" user
+still has not been attached to a school — `create_school` remains
+written but intentionally not run. The real dev database has been
+migrated through `0012`; all four resource models are owned by the same
+"Default School" that already owns "Demo 2026" and its 2100 Lessons.
 
 ## Immediate next step
 
-1. Review the diff for both the Phase 1 and Phase 2 slices.
+1. Review the diff for the Phase 1, Phase 2, and Phase 3 slices.
 2. Decide whether/when to run `create_school` against the dev database.
 3. Commit.
-4. Move to Phase 3 (connect Teacher, Room, Subject, StudentGroup to
-   School).
+4. Move to Phase 4 (School data isolation: current-school resolution,
+   query/IDOR scoping, form scoping).
 
 ---
 
@@ -595,7 +633,10 @@ prematurely.
       with a `role` field (currently only `PRINCIPAL`).
 - [ ] Public timetable URL structure.
 - [ ] Whether `school_id` should ever be denormalized onto Period/Lesson
-      for defense-in-depth.
+      for defense-in-depth (Phase 3 answered this narrowly for Lesson:
+      no FK added; a `CrossSchoolLessonError` application-layer check
+      is used instead — see the Phase 6 notes above. Still open for
+      Period/Lesson more broadly).
 - [ ] Final Django Admin policy.
 - [ ] Final registration/user onboarding flow.
 - [ ] Whether public timetable browsing should be supported and how
@@ -702,3 +743,93 @@ Phase 1 and Phase 2 are both implemented and verified but not committed.
 
 Review the diff, decide on committing, then move to Phase 3 (connect
 Teacher, Room, Subject, and StudentGroup to School).
+
+## 2026-09-18 — Phase 3: School-owned resources
+
+### Completed
+
+- Added `school` as a required `ForeignKey` to School (`on_delete=CASCADE`)
+  on `Teacher`, `Room`, `Subject`, and `StudentGroup`; replaced each
+  model's global `unique=True` on `name` with a per-school
+  `UniqueConstraint(school, name)`; set `Meta.ordering = ["school", "name"]`
+  for all four. Left `Subject.code` untouched (no uniqueness existed
+  before, none added).
+- Split the schema change into three migrations, mirroring Phase 2's
+  strategy but bundled across all four models so the backfill assigns
+  them to one reused School:
+  - `0010_school_owned_resources_nullable` — add `school` (nullable) to
+    all four models.
+  - `0011_backfill_school_owned_resources` — `RunPython`: reuses (via
+    `get_or_create(name="Default School")`) the exact same "Default
+    School" Phase 2's `0008` already created, then bulk-assigns any
+    orphaned rows in all four models to it.
+  - `0012_school_owned_resources_required` — make `school` required,
+    drop `name`'s field-level uniqueness, add the per-school
+    `UniqueConstraint`s, set the new ordering.
+- Added a narrow Lesson-resource cross-school integrity guard (a slice
+  of Phase 6, pulled forward — see the Phase 6 notes above): a new
+  `CrossSchoolLessonError` domain exception; `ResourceSchoolIds` and
+  `get_resource_school_ids()`/`get_academic_year_school_id()` added to
+  the `LessonRepository` protocol and its Django implementation;
+  `ScheduleService._ensure_same_school()` calls it from both
+  `create_lesson()` and `update_lesson()`; `LessonWriteMixin` in
+  `views.py` catches it as a non-field form error. Explicitly does not
+  add a `school` FK to `Lesson`, does not check `planned_substitute`
+  against this invariant, and does not scope the Lesson form's
+  dropdowns (all deliberately out of scope).
+- Scoped `list_teachers()` by school (a slice of Phase 7, pulled
+  forward — see the Phase 7 notes above): its signature now requires
+  `school_id`; `SubstitutionService.available_teachers()`,
+  `.generate_planned_substitutions()`, `.generate_plan()`, and
+  `ScheduleService.staff_schedule()` resolve the school via the new
+  `get_academic_year_school_id()` from the `academic_year_id` they
+  already receive, so none of their own public signatures (or their
+  view/demo-data callers) needed to change.
+- Updated `TeacherForm`/`RoomForm`/`SubjectForm`/`StudentGroupForm` to
+  include `school` (unscoped, same treatment as `AcademicYearForm`);
+  updated the four list views' `columns` and the four `ModelAdmin`s to
+  show/filter by `school`.
+- Updated `load_demo_data` to thread the demo AcademicYear's `school`
+  through teacher/room/subject/student-group creation and lookup.
+- Updated every existing `Teacher/Room/Subject/StudentGroup.objects.create(...)`
+  call across 7 test files to pass an explicit `school=`.
+- Added `tests/infrastructure/test_resource_school_ownership.py`
+  (required FK, per-school uniqueness, cross-school duplicate names
+  allowed, cascade delete, and `ProtectedError` when a resource is still
+  referenced by a Lesson — parametrized across all four models),
+  `tests/integration/test_school_owned_resources_migration.py` (the
+  `0011` backfill via `MigrationExecutor`, including the real-dev-DB
+  scenario of an already-existing "Default School" being reused rather
+  than duplicated), `tests/integration/test_lesson_school_integrity.py`
+  (real-DB `CrossSchoolLessonError` coverage for all four resource
+  types, both create and update), a real-DB `list_teachers()` isolation
+  test in `tests/infrastructure/test_django_lesson_conflicts.py`, new
+  fake-repository isolation tests in `test_schedule_service.py` and
+  `test_substitution_service.py`, and a web-level test confirming the
+  Lesson form surfaces the cross-school error as a non-field error.
+- Verification performed:
+  - `makemigrations --check --dry-run` → no changes detected.
+  - `manage.py check` → no issues.
+  - Full pytest suite → 162 passed, 1 pre-existing failure unrelated to
+    this change (`test_administrator_navigation`; confirmed it also
+    fails on the pre-Phase-3 code via `git stash`).
+  - Applied `0010`–`0012` to the real dev `db.sqlite3` (a backup was
+    taken beforehand and removed after verifying success). Confirmed
+    afterward: still 1 `School` ("Default School"), Teacher/Room/
+    Subject/StudentGroup/Lesson counts unchanged (80/42/10/42/2100), all
+    four resource models owned solely by "Default School", and zero
+    Lessons found combining resources from different schools.
+- No changes to `Lesson` (no `school` FK added), no domain-layer
+  `school_id` added to the domain `Teacher` dataclass, and no Phase 4
+  authentication/current-school system or Phase 9 multi-school demo
+  redesign implemented.
+
+### Current task
+
+Phase 1, Phase 2, and Phase 3 are all implemented and verified but not
+committed.
+
+### Next
+
+Review the diff, decide on committing, then move to Phase 4 (School
+data isolation).

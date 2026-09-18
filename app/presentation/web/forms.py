@@ -23,25 +23,25 @@ class BaseStyledModelForm(forms.ModelForm):
 class TeacherForm(BaseStyledModelForm):
     class Meta:
         model = Teacher
-        fields = ["name", "email"]
+        fields = ["school", "name", "email"]
 
 
 class RoomForm(BaseStyledModelForm):
     class Meta:
         model = Room
-        fields = ["name", "capacity"]
+        fields = ["school", "name", "capacity"]
 
 
 class SubjectForm(BaseStyledModelForm):
     class Meta:
         model = Subject
-        fields = ["name", "code"]
+        fields = ["school", "name", "code"]
 
 
 class StudentGroupForm(BaseStyledModelForm):
     class Meta:
         model = StudentGroup
-        fields = ["name", "size"]
+        fields = ["school", "name", "size"]
 
 
 class AcademicYearForm(BaseStyledModelForm):

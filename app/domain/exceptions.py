@@ -18,6 +18,10 @@ class InvalidLessonPlacementError(DomainError):
     """Raised when a lesson cannot occupy its requested periods."""
 
 
+class CrossSchoolLessonError(DomainError):
+    """Raised when a lesson's resources do not all belong to one school."""
+
+
 class ScheduleConflictError(DomainError):
     """Raised when a lesson would conflict with an existing lesson."""
 

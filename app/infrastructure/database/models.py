@@ -65,48 +65,72 @@ class AcademicYear(models.Model):
 
 
 class Teacher(models.Model):
-    name = models.CharField(max_length=120, unique=True)
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="teachers")
+    name = models.CharField(max_length=120)
     email = models.EmailField(blank=True)
 
     class Meta:
         app_label = "app"
-        ordering = ["name"]
+        ordering = ["school", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "name"], name="unique_teacher_name_per_school"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.name
 
 
 class Room(models.Model):
-    name = models.CharField(max_length=80, unique=True)
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="rooms")
+    name = models.CharField(max_length=80)
     capacity = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         app_label = "app"
-        ordering = ["name"]
+        ordering = ["school", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "name"], name="unique_room_name_per_school"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.name
 
 
 class Subject(models.Model):
-    name = models.CharField(max_length=120, unique=True)
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="subjects")
+    name = models.CharField(max_length=120)
     code = models.CharField(max_length=30, blank=True)
 
     class Meta:
         app_label = "app"
-        ordering = ["name"]
+        ordering = ["school", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "name"], name="unique_subject_name_per_school"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.name
 
 
 class StudentGroup(models.Model):
-    name = models.CharField(max_length=120, unique=True)
+    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name="student_groups")
+    name = models.CharField(max_length=120)
     size = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
         app_label = "app"
-        ordering = ["name"]
+        ordering = ["school", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "name"], name="unique_student_group_name_per_school"
+            )
+        ]
 
     def __str__(self) -> str:
         return self.name

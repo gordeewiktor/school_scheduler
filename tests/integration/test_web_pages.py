@@ -47,10 +47,11 @@ def lesson_form_data(db):
         start_time=time(9), end_time=time(10)
     )
     return {
-        "teacher": Teacher.objects.create(name="Ada"),
-        "subject": Subject.objects.create(name="Math"),
-        "room": Room.objects.create(name="A101"),
-        "student_group": StudentGroup.objects.create(name="Grade 1"),
+        "school": school,
+        "teacher": Teacher.objects.create(school=school, name="Ada"),
+        "subject": Subject.objects.create(school=school, name="Math"),
+        "room": Room.objects.create(school=school, name="A101"),
+        "student_group": StudentGroup.objects.create(school=school, name="Grade 1"),
         "day": "MONDAY",
         "start_period": first,
         "second_period": second,
@@ -185,6 +186,20 @@ def test_lesson_form_writes_through_service(authenticated_client, lesson_form_da
 
 
 @pytest.mark.django_db
+def test_lesson_form_rejects_room_from_another_school(authenticated_client, lesson_form_data):
+    other_school = School.objects.create(name="Other School")
+    foreign_room = Room.objects.create(school=other_school, name="Foreign Room")
+    data = post_data(lesson_form_data)
+    data["room"] = foreign_room.pk
+
+    response = authenticated_client.post(reverse("lesson-create"), data)
+
+    assert response.status_code == 200
+    assert response.context["form"].non_field_errors()
+    assert not Lesson.objects.exists()
+
+
+@pytest.mark.django_db
 def test_lesson_form_returns_conflict_on_same_teacher(authenticated_client, lesson_form_data):
     authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
     response = authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
@@ -292,7 +307,7 @@ def test_timetable_lessons_link_to_existing_edit_flow(
 def test_timetable_displays_planned_substitute(
     authenticated_client, lesson_form_data
 ):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         planned_substitute=substitute,
@@ -319,7 +334,7 @@ def test_timetable_displays_planned_substitute(
 def test_whole_school_cards_link_to_edit_and_display_planned_substitute(
     authenticated_client, lesson_form_data
 ):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         planned_substitute=substitute,
@@ -377,7 +392,7 @@ def test_generation_buttons_require_confirmation(authenticated_client, lesson_fo
 def test_generate_planned_substitutions_updates_timetable(
     authenticated_client, lesson_form_data
 ):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         subject=lesson_form_data["subject"],
@@ -412,8 +427,8 @@ def test_generate_planned_substitutions_updates_timetable(
 def test_generate_planned_substitutions_persists_teaching_free_fallback(
     authenticated_client, lesson_form_data
 ):
-    substitute = Teacher.objects.create(name="Grace")
-    second_teacher = Teacher.objects.create(name="Katherine")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
+    second_teacher = Teacher.objects.create(school=lesson_form_data["school"], name="Katherine")
     Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         subject=lesson_form_data["subject"],
@@ -425,8 +440,10 @@ def test_generate_planned_substitutions_persists_teaching_free_fallback(
     Lesson.objects.create(
         teacher=second_teacher,
         subject=lesson_form_data["subject"],
-        room=Room.objects.create(name="Fallback room"),
-        student_group=StudentGroup.objects.create(name="Fallback group"),
+        room=Room.objects.create(school=lesson_form_data["school"], name="Fallback room"),
+        student_group=StudentGroup.objects.create(
+            school=lesson_form_data["school"], name="Fallback group"
+        ),
         day="MONDAY",
         start_period=lesson_form_data["start_period"],
     )
@@ -445,7 +462,7 @@ def test_generate_planned_substitutions_persists_teaching_free_fallback(
 def test_lesson_edit_form_displays_current_substitution_teacher(
     authenticated_client, lesson_form_data
 ):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         planned_substitute=substitute,
@@ -466,7 +483,7 @@ def test_lesson_edit_form_displays_current_substitution_teacher(
 
 @pytest.mark.django_db
 def test_lesson_edit_can_add_substitution_teacher(authenticated_client, lesson_form_data):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         subject=lesson_form_data["subject"],
@@ -487,8 +504,8 @@ def test_lesson_edit_can_add_substitution_teacher(authenticated_client, lesson_f
 
 @pytest.mark.django_db
 def test_lesson_edit_can_change_substitution_teacher(authenticated_client, lesson_form_data):
-    original = Teacher.objects.create(name="Grace")
-    replacement = Teacher.objects.create(name="Katherine")
+    original = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
+    replacement = Teacher.objects.create(school=lesson_form_data["school"], name="Katherine")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         planned_substitute=original,
@@ -510,7 +527,7 @@ def test_lesson_edit_can_change_substitution_teacher(authenticated_client, lesso
 
 @pytest.mark.django_db
 def test_lesson_edit_can_remove_substitution_teacher(authenticated_client, lesson_form_data):
-    substitute = Teacher.objects.create(name="Grace")
+    substitute = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         planned_substitute=substitute,
@@ -555,7 +572,7 @@ def test_lesson_edit_validates_substitution_teacher(authenticated_client, lesson
 def test_existing_lesson_editing_continues_to_update_core_fields(
     authenticated_client, lesson_form_data
 ):
-    new_room = Room.objects.create(name="B202")
+    new_room = Room.objects.create(school=lesson_form_data["school"], name="B202")
     lesson = Lesson.objects.create(
         teacher=lesson_form_data["teacher"],
         subject=lesson_form_data["subject"],
@@ -595,9 +612,9 @@ def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client
 def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
     school = School.objects.create(name="Test School")
     AcademicYear.objects.create(school=school, name="2026")
-    Teacher.objects.create(name="Ada")
-    Room.objects.create(name="A101")
-    StudentGroup.objects.create(name="Grade 1")
+    Teacher.objects.create(school=school, name="Ada")
+    Room.objects.create(school=school, name="A101")
+    StudentGroup.objects.create(school=school, name="Grade 1")
 
     response = authenticated_client.get(reverse("schedule"), {"view": "teacher"})
 
@@ -665,7 +682,7 @@ def test_public_user_cannot_access_administration_pages(client):
 def test_public_user_can_access_focused_schedule(client):
     school = School.objects.create(name="Test School")
     year = AcademicYear.objects.create(school=school, name="2026")
-    teacher = Teacher.objects.create(name="Ada")
+    teacher = Teacher.objects.create(school=school, name="Ada")
 
     response = client.get(
         reverse("schedule"),
@@ -680,8 +697,8 @@ def test_public_user_can_access_focused_schedule(client):
 def test_public_user_can_access_student_group_and_room_schedules(client):
     school = School.objects.create(name="Test School")
     year = AcademicYear.objects.create(school=school, name="2026")
-    student_group = StudentGroup.objects.create(name="Grade 1")
-    room = Room.objects.create(name="A101")
+    student_group = StudentGroup.objects.create(school=school, name="Grade 1")
+    room = Room.objects.create(school=school, name="A101")
 
     student_group_response = client.get(
         reverse("schedule"),
@@ -719,7 +736,7 @@ def test_teacher_substitution_form_submission_lists_available_teachers(
     authenticated_client, lesson_form_data
 ):
     busy_teacher = lesson_form_data["teacher"]
-    free_teacher = Teacher.objects.create(name="Grace")
+    free_teacher = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
     Lesson.objects.create(
         teacher=busy_teacher,
         subject=lesson_form_data["subject"],

@@ -29,15 +29,16 @@ def school_data(db):
         Period.objects.create(academic_year=year, name="Period 3", order=4, start_time=time(10, 30), end_time=time(11, 30)),
     ]
     return {
+        "school": school,
         "year": year,
         "periods": periods,
-        "teacher": Teacher.objects.create(name="Ada Lovelace"),
-        "other_teacher": Teacher.objects.create(name="Grace Hopper"),
-        "room": Room.objects.create(name="A101"),
-        "other_room": Room.objects.create(name="B202"),
-        "subject": Subject.objects.create(name="Math"),
-        "group": StudentGroup.objects.create(name="Grade 1"),
-        "other_group": StudentGroup.objects.create(name="Grade 2"),
+        "teacher": Teacher.objects.create(school=school, name="Ada Lovelace"),
+        "other_teacher": Teacher.objects.create(school=school, name="Grace Hopper"),
+        "room": Room.objects.create(school=school, name="A101"),
+        "other_room": Room.objects.create(school=school, name="B202"),
+        "subject": Subject.objects.create(school=school, name="Math"),
+        "group": StudentGroup.objects.create(school=school, name="Grade 1"),
+        "other_group": StudentGroup.objects.create(school=school, name="Grade 2"),
     }
 
 
@@ -135,7 +136,7 @@ def test_update_rejects_conflict_with_another_lesson(school_data):
 
 @pytest.mark.django_db
 def test_repository_lists_teachers_as_domain_models(school_data):
-    teachers = DjangoLessonRepository().list_teachers()
+    teachers = DjangoLessonRepository().list_teachers(school_data["school"].pk)
 
     assert [teacher.name for teacher in teachers] == ["Ada Lovelace", "Grace Hopper"]
     assert all(teacher.__class__.__module__ == "app.domain.models" for teacher in teachers)

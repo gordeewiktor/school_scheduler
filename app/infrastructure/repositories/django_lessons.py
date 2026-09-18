@@ -1,6 +1,6 @@
 from django.db.models import Q
 
-from app.application.ports.repositories import ScheduledLesson
+from app.application.ports.repositories import ResourceSchoolIds, ScheduledLesson
 from app.domain.models import (
     Day,
     Lesson as DomainLesson,
@@ -8,15 +8,57 @@ from app.domain.models import (
     Teacher as DomainTeacher,
 )
 from app.domain.policies import ExistingLesson, LessonRequest
-from app.infrastructure.database.models import Lesson, Period, Teacher
+from app.infrastructure.database.models import (
+    AcademicYear,
+    Lesson,
+    Period,
+    Room,
+    StudentGroup,
+    Subject,
+    Teacher,
+)
 
 
 class DjangoLessonRepository:
-    def list_teachers(self) -> list[DomainTeacher]:
+    def list_teachers(self, school_id: int) -> list[DomainTeacher]:
         return [
             DomainTeacher(id=teacher.id, name=teacher.name, email=teacher.email)
-            for teacher in Teacher.objects.order_by("name")
+            for teacher in Teacher.objects.filter(school_id=school_id).order_by("name")
         ]
+
+    def get_academic_year_school_id(self, academic_year_id: int) -> int | None:
+        return (
+            AcademicYear.objects.filter(pk=academic_year_id)
+            .values_list("school_id", flat=True)
+            .first()
+        )
+
+    def get_resource_school_ids(
+        self,
+        *,
+        teacher_id: int,
+        room_id: int,
+        subject_id: int,
+        student_group_id: int,
+        period_id: int,
+    ) -> ResourceSchoolIds:
+        return ResourceSchoolIds(
+            teacher_school_id=Teacher.objects.filter(pk=teacher_id)
+            .values_list("school_id", flat=True)
+            .first(),
+            room_school_id=Room.objects.filter(pk=room_id)
+            .values_list("school_id", flat=True)
+            .first(),
+            subject_school_id=Subject.objects.filter(pk=subject_id)
+            .values_list("school_id", flat=True)
+            .first(),
+            student_group_school_id=StudentGroup.objects.filter(pk=student_group_id)
+            .values_list("school_id", flat=True)
+            .first(),
+            period_school_id=Period.objects.filter(pk=period_id)
+            .values_list("academic_year__school_id", flat=True)
+            .first(),
+        )
 
     def get_period(self, period_id: int) -> DomainPeriod | None:
         try:

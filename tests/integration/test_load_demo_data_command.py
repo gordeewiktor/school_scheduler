@@ -175,10 +175,10 @@ def test_load_demo_data_rerun_does_not_duplicate_lessons():
 def test_load_demo_data_uses_only_demo_master_data_for_generated_timetable():
     school = School.objects.create(name="Test School")
     AcademicYear.objects.create(school=school, name="2027")
-    Teacher.objects.create(name="Manual Teacher")
-    StudentGroup.objects.create(name="Manual Class")
-    Room.objects.create(name="Manual Room")
-    Subject.objects.create(name="Manual Subject")
+    Teacher.objects.create(school=school, name="Manual Teacher")
+    StudentGroup.objects.create(school=school, name="Manual Class")
+    Room.objects.create(school=school, name="Manual Room")
+    Subject.objects.create(school=school, name="Manual Subject")
 
     call_command("load_demo_data", stdout=StringIO())
 

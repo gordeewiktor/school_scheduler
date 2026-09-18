@@ -13,7 +13,11 @@ from django.urls import reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView, View
 
-from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
+from app.domain.exceptions import (
+    CrossSchoolLessonError,
+    InvalidLessonPlacementError,
+    ScheduleConflictError,
+)
 from app.domain.models import Day, Lesson as DomainLesson
 from app.infrastructure.database.models import (
     AcademicYear,
@@ -168,7 +172,7 @@ class TeacherListView(SchedulerListView):
     create_url_name = "teacher-create"
     edit_url_name = "teacher-update"
     delete_url_name = "teacher-delete"
-    columns = [("name", "Name"), ("email", "Email")]
+    columns = [("name", "Name"), ("email", "Email"), ("school", "School")]
 
 
 class TeacherCreateView(SchedulerCreateView):
@@ -197,7 +201,7 @@ class RoomListView(SchedulerListView):
     create_url_name = "room-create"
     edit_url_name = "room-update"
     delete_url_name = "room-delete"
-    columns = [("name", "Name"), ("capacity", "Capacity")]
+    columns = [("name", "Name"), ("capacity", "Capacity"), ("school", "School")]
 
 
 class RoomCreateView(SchedulerCreateView):
@@ -226,7 +230,7 @@ class SubjectListView(SchedulerListView):
     create_url_name = "subject-create"
     edit_url_name = "subject-update"
     delete_url_name = "subject-delete"
-    columns = [("name", "Name"), ("code", "Code")]
+    columns = [("name", "Name"), ("code", "Code"), ("school", "School")]
 
 
 class SubjectCreateView(SchedulerCreateView):
@@ -255,7 +259,7 @@ class StudentGroupListView(SchedulerListView):
     create_url_name = "student-group-create"
     edit_url_name = "student-group-update"
     delete_url_name = "student-group-delete"
-    columns = [("name", "Name"), ("size", "Size")]
+    columns = [("name", "Name"), ("size", "Size"), ("school", "School")]
 
 
 class StudentGroupCreateView(SchedulerCreateView):
@@ -397,6 +401,9 @@ class LessonWriteMixin:
             return self.form_invalid(form)
         except InvalidLessonPlacementError as exc:
             form.add_error("start_period", str(exc))
+            return self.form_invalid(form)
+        except CrossSchoolLessonError as exc:
+            form.add_error(None, str(exc))
             return self.form_invalid(form)
         return redirect(self.get_success_url())
 

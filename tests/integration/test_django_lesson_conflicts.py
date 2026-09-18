@@ -29,15 +29,16 @@ def school_data(db):
         Period.objects.create(academic_year=year, name="Period 3", order=4, start_time=time(10, 30), end_time=time(11, 30)),
     ]
     return {
+        "school": school,
         "year": year,
         "periods": periods,
-        "teacher": Teacher.objects.create(name="Ada Lovelace"),
-        "other_teacher": Teacher.objects.create(name="Grace Hopper"),
-        "room": Room.objects.create(name="A101"),
-        "other_room": Room.objects.create(name="B202"),
-        "subject": Subject.objects.create(name="Math"),
-        "group": StudentGroup.objects.create(name="Grade 1"),
-        "other_group": StudentGroup.objects.create(name="Grade 2"),
+        "teacher": Teacher.objects.create(school=school, name="Ada Lovelace"),
+        "other_teacher": Teacher.objects.create(school=school, name="Grace Hopper"),
+        "room": Room.objects.create(school=school, name="A101"),
+        "other_room": Room.objects.create(school=school, name="B202"),
+        "subject": Subject.objects.create(school=school, name="Math"),
+        "group": StudentGroup.objects.create(school=school, name="Grade 1"),
+        "other_group": StudentGroup.objects.create(school=school, name="Grade 2"),
     }
 
 
@@ -199,7 +200,7 @@ def test_create_rejects_planned_substitute_already_substituting(school_data):
             planned_substitute_id=school_data["other_teacher"].pk,
         )
     )
-    third_teacher = Teacher.objects.create(name="Katherine Johnson")
+    third_teacher = Teacher.objects.create(school=school_data["school"], name="Katherine Johnson")
 
     with pytest.raises(ScheduleConflictError):
         service().create_lesson(
@@ -235,7 +236,7 @@ def test_create_rejects_teacher_already_substituting(school_data):
 
 @pytest.mark.django_db
 def test_repository_lists_teachers_as_domain_models(school_data):
-    teachers = DjangoLessonRepository().list_teachers()
+    teachers = DjangoLessonRepository().list_teachers(school_data["school"].pk)
 
     assert [teacher.name for teacher in teachers] == ["Ada Lovelace", "Grace Hopper"]
     assert all(teacher.__class__.__module__ == "app.domain.models" for teacher in teachers)

@@ -8,6 +8,15 @@ from app.domain.policies import ExistingLesson, LessonRequest
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceSchoolIds:
+    teacher_school_id: int | None
+    room_school_id: int | None
+    subject_school_id: int | None
+    student_group_school_id: int | None
+    period_school_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduledLesson:
     id: int
     teacher_id: int
@@ -25,7 +34,19 @@ class ScheduledLesson:
 
 
 class LessonRepository(Protocol):
-    def list_teachers(self) -> list[Teacher]: ...
+    def list_teachers(self, school_id: int) -> list[Teacher]: ...
+
+    def get_academic_year_school_id(self, academic_year_id: int) -> int | None: ...
+
+    def get_resource_school_ids(
+        self,
+        *,
+        teacher_id: int,
+        room_id: int,
+        subject_id: int,
+        student_group_id: int,
+        period_id: int,
+    ) -> ResourceSchoolIds: ...
 
     def get_period(self, period_id: int) -> Period | None: ...
 

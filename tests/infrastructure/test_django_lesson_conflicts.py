@@ -28,13 +28,13 @@ def test_list_lessons_for_substitute_returns_only_assigned_lessons():
         end_time=time(8, 45),
     )
 
-    teacher = Teacher.objects.create(name="Alice")
-    substitute = Teacher.objects.create(name="Bob")
-    other_teacher = Teacher.objects.create(name="Charlie")
+    teacher = Teacher.objects.create(school=school, name="Alice")
+    substitute = Teacher.objects.create(school=school, name="Bob")
+    other_teacher = Teacher.objects.create(school=school, name="Charlie")
 
-    subject = Subject.objects.create(name="Math")
-    room = Room.objects.create(name="101")
-    group = StudentGroup.objects.create(name="7A")
+    subject = Subject.objects.create(school=school, name="Math")
+    room = Room.objects.create(school=school, name="101")
+    group = StudentGroup.objects.create(school=school, name="7A")
 
     lesson_with_substitute = Lesson.objects.create(
         teacher=teacher,
@@ -66,3 +66,15 @@ def test_list_lessons_for_substitute_returns_only_assigned_lessons():
     assert len(lessons) == 1
     assert lessons[0].id == lesson_with_substitute.id
     assert lessons[0].teacher_name == "Alice"
+
+
+@pytest.mark.django_db
+def test_list_teachers_excludes_teachers_from_another_school():
+    school = School.objects.create(name="Home School")
+    other_school = School.objects.create(name="Other School")
+    home_teacher = Teacher.objects.create(school=school, name="Ada")
+    Teacher.objects.create(school=other_school, name="Zoe")
+
+    teachers = DjangoLessonRepository().list_teachers(school.id)
+
+    assert [teacher.id for teacher in teachers] == [home_teacher.id]

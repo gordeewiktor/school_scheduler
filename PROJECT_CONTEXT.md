@@ -258,9 +258,8 @@ The current models include:
 - Period
 - Lesson
 
-`AcademicYear` is connected to `School` (required foreign key, see
-§10). `Teacher`, `Room`, `Subject`, and `StudentGroup` are not yet
-connected to `School` — that is Phase 3 (see §11–§12).
+`AcademicYear`, `Teacher`, `Room`, `Subject`, and `StudentGroup` are all
+connected to `School` via required foreign keys (see §10 and §15).
 
 ---
 
@@ -269,15 +268,13 @@ connected to `School` — that is Phase 3 (see §11–§12).
 The current conceptual structure is approximately:
 
     School
-        │
-        └── AcademicYear
-                │
-                └── Period
-
-    Teacher
-    Room
-    Subject
-    StudentGroup
+        ├── AcademicYear
+        │       │
+        │       └── Period
+        ├── Teacher
+        ├── Room
+        ├── Subject
+        └── StudentGroup
 
     Lesson
         ├── Teacher
@@ -287,10 +284,11 @@ The current conceptual structure is approximately:
         ├── Period
         └── planned substitute Teacher
 
-`School` and `SchoolMembership` exist (see §11–§12). `AcademicYear` now
-has a required foreign key to `School` (see §10). `Teacher`, `Room`,
-`Subject`, and `StudentGroup` are still unscoped — that is Phase 3, not
-yet implemented.
+`School` and `SchoolMembership` exist (see §11–§12). `AcademicYear`,
+`Teacher`, `Room`, `Subject`, and `StudentGroup` all have a required
+foreign key to `School` (see §10 and §15). `Lesson` still has no
+`school` foreign key of its own — see §17 for how its consistency with
+one School is now enforced instead.
 
 ---
 
@@ -331,9 +329,9 @@ the application.
 Current fields: `name` (CharField, intentionally NOT globally unique —
 real schools can share a name) and `created_at`.
 
-Nothing else references `School` yet. `AcademicYear`, `Teacher`, `Room`,
-`Subject`, and `StudentGroup` do not yet have a `school` foreign key —
-that is Phase 2/3 of the roadmap, not yet implemented.
+`AcademicYear`, `Teacher`, `Room`, `Subject`, and `StudentGroup` all
+have a required `school` foreign key (Phase 2 and Phase 3 of the
+roadmap, both implemented — see §10 and §15).
 
 The future architecture is:
 
@@ -469,19 +467,14 @@ This applies to:
 
 # 15. School-Owned Resources
 
-The following resources are intended to belong directly to a School:
+`Teacher`, `Room`, `Subject`, and `StudentGroup` each belong directly to
+a `School` (required `ForeignKey`, `on_delete=CASCADE`). This is
+implemented, tested, and applied to the real development database.
 
-- Teacher
-- Room
-- Subject
-- StudentGroup
+These resources are reusable across academic years within the same
+School — they belong to `School`, not `AcademicYear`.
 
-These resources should be reusable across academic years.
-
-For example, a teacher should not normally need to be recreated every
-time a new academic year is created.
-
-The intended relationship is:
+The relationship is:
 
     School
        ├── Teachers
@@ -489,15 +482,35 @@ The intended relationship is:
        ├── Subjects
        └── StudentGroups
 
-Therefore, their names should eventually be unique within a School,
-rather than globally.
-
-For example:
+Each model's `name` is no longer globally unique. It is unique per
+School via a `UniqueConstraint(fields=["school", "name"])`, replacing
+the old field-level `unique=True`. For example:
 
     School A → Teacher "John Smith"
     School B → Teacher "John Smith"
 
-should be valid.
+is valid, while the same name twice within one School is rejected.
+`Meta.ordering` is `["school", "name"]` for all four models.
+
+`Subject.code` has no uniqueness constraint — it never did, and Phase 3
+did not add one.
+
+Deleting a School cascades to its Teachers/Rooms/Subjects/StudentGroups,
+*unless* one of them is still referenced by a `Lesson` (`Lesson`'s
+foreign keys to these models are `on_delete=PROTECT`), in which case the
+deletion is blocked with `ProtectedError` — the same pattern already
+used for `AcademicYear` → `Period` → `Lesson`.
+
+`TeacherForm`, `RoomForm`, `SubjectForm`, and `StudentGroupForm` now
+include `school` as a field (unscoped — lists every School; scoping the
+choices to the authenticated principal's school is Phase 4, same as
+`AcademicYearForm`). The corresponding list views and admin pages show
+a School column/filter.
+
+The `load_demo_data` command threads the demo AcademicYear's School
+through teacher/room/subject/student-group creation, so demo data still
+loads correctly; it does not yet generate more than one School's worth
+of demo data (that richer multi-school demo redesign is still pending).
 
 ---
 
@@ -542,21 +555,35 @@ Lessons currently reference:
 - planned substitute Teacher
 - notes
 
-A lesson does not currently have a direct School foreign key.
+A lesson does not have a direct School foreign key, and Phase 3
+deliberately did not add one — the initial multi-school design avoids
+unnecessary denormalized relationships.
 
-The initial multi-school design should avoid unnecessary denormalized
-relationships.
+Instead, `ScheduleService._ensure_same_school()` (called from both
+`create_lesson()` and `update_lesson()`, before conflict checking) now
+enforces that the Teacher, Subject, Room, and StudentGroup attached to a
+Lesson all belong to the same School as the AcademicYear that owns the
+Lesson's Period. It does this by asking the repository
+(`LessonRepository.get_resource_school_ids()`) for each resource's
+`school_id` and the Period's (via its AcademicYear) `school_id`, and
+raising `CrossSchoolLessonError` (a new `DomainError`, not a subclass of
+`InvalidLessonPlacementError`) if they don't all match. The domain layer
+itself stays framework-independent — the school-id lookup lives in the
+Django repository; only the comparison lives in the application-layer
+service.
 
-Instead, the application should ensure that:
+`LessonWriteMixin` (the Django view mixin backing the Lesson create/edit
+forms) catches `CrossSchoolLessonError` and attaches it as a non-field
+form error, the same way it already handles `ScheduleConflictError` and
+`InvalidLessonPlacementError`.
 
-- the Lesson's AcademicYear belongs to the current School;
-- the Teacher belongs to the same School;
-- the Subject belongs to the same School;
-- the Room belongs to the same School;
-- the StudentGroup belongs to the same School;
-- the Period belongs to the same School through its AcademicYear.
-
-Cross-school references must be rejected.
+This is a narrow data-integrity guard, not the full Phase 6 lesson/
+scheduling access-control system: it does not scope the Lesson form's
+ModelChoiceField querysets (a School A principal can still *see* School
+B's teachers/rooms/etc. in the dropdowns until Phase 4), it does not
+check the `planned_substitute` field against this invariant, and it does
+not resolve an authenticated "current school" — it only rejects an
+inconsistent combination once one is submitted.
 
 ---
 
@@ -581,19 +608,33 @@ data from different schools.
 
 # 19. Repository Layer
 
-The application uses a LessonRepository interface/Protocol.
+The application uses a LessonRepository interface/Protocol
+(`app/application/ports/repositories.py`), implemented by
+`DjangoLessonRepository`.
 
-Infrastructure contains a Django implementation, currently represented
-by a Django lesson repository.
+`list_teachers()` now requires a `school_id` argument and only returns
+Teachers belonging to that School (`Teacher.objects.filter(school_id=...)`).
+Two supporting Protocol methods were added to make this possible without
+requiring an authenticated "current school" (Phase 4 does not exist
+yet): `get_academic_year_school_id(academic_year_id)` resolves an
+AcademicYear to its owning School, and `get_resource_school_ids(...)`
+resolves a would-be Lesson's Teacher/Room/Subject/StudentGroup/Period to
+their School ids (used by the §17 cross-school lesson guard).
 
-Repositories should eventually receive or otherwise operate within an
-explicit school scope where appropriate.
+Every caller that previously called `list_teachers()` unscoped
+(`SubstitutionService.available_teachers()`,
+`.generate_planned_substitutions()`, `.generate_plan()`, and
+`ScheduleService.staff_schedule()`) now resolves the relevant School via
+`get_academic_year_school_id()` first. Their own public signatures are
+unchanged — they still just take an `academic_year_id`, so no view or
+demo-data call site needed to change.
 
-Repository methods must not accidentally return data from other
-schools.
-
-For example, a method that retrieves teachers for substitution must
-only consider teachers belonging to the current school.
+This is a repository/service *contract* change, not the full Phase 4
+authorization system: there is still no session-level "current school",
+and nothing yet stops a view from calling these methods with an
+arbitrary `academic_year_id`/`school_id`. What changed is that the
+contract itself is now safe to wire up once Phase 4 resolves a current
+school — it can no longer silently return every school's teachers.
 
 ---
 
@@ -621,6 +662,12 @@ This algorithm must operate only on teachers belonging to the current
 school.
 
 A teacher from another school must never appear in the candidate pool.
+This is now enforced: `SubstitutionService` resolves the academic year's
+School and passes it to `list_teachers(school_id)` before building the
+candidate pool, so a teacher from a different School can no longer be
+selected as a substitute — verified by fake-repository unit tests
+(`tests/application/test_substitution_service.py`) and a real-database
+repository test (`tests/infrastructure/test_django_lesson_conflicts.py`).
 
 ---
 
@@ -629,18 +676,24 @@ A teacher from another school must never appear in the candidate pool.
 The current code contains several assumptions that work only because
 there is effectively one school.
 
-Examples include:
+Resolved by Phase 2/3:
 
-- globally unique Teacher names;
-- globally unique Room names;
-- globally unique Subject names;
-- globally unique StudentGroup names;
-- globally unique AcademicYear names;
-- unscoped repository queries;
-- CRUD views querying all records;
+- globally unique Teacher/Room/Subject/StudentGroup/AcademicYear names
+  (now per-school unique constraints);
+- `list_teachers()` and the substitution/staff-schedule services
+  returning every school's teachers (now scoped by school, see §19–20).
+
+Still open (Phase 4+):
+
+- unscoped repository queries for AcademicYear/Period/Lesson and the
+  Lesson form's ModelChoiceFields (Teacher/Room/Subject/StudentGroup/
+  Period/AcademicYear dropdowns still list every school's records);
+- CRUD views querying all records (list views show every school's rows);
 - schedule selection using globally available AcademicYears;
-- demo data assuming one school;
-- no current-school context.
+- demo data assuming one school (richer multi-school demo data is a
+  later, separate redesign);
+- no current-school context (no session/request-level "acting as School
+  X" resolution exists yet).
 
 These assumptions must be identified and removed carefully during the
 multi-school transition.
@@ -941,13 +994,34 @@ backfill → required sequence has been run against the real development
 database. Its one existing AcademicYear ("Demo 2026") is now owned by
 an auto-created "Default School".
 
+`Teacher`, `Room`, `Subject`, and `StudentGroup` now belong to `School`
+(see §15): required foreign keys, per-school unique names, the same
+staged nullable → backfill → required migration sequence
+(`0010`–`0012`), and forms/list-views/admin updated to expose/show
+`school`. The backfill migration reused the same "Default School" row
+Phase 2 created, rather than creating a second one — verified against
+the real development database (all 80 Teachers / 42 Rooms / 10 Subjects
+/ 42 StudentGroups / 2100 Lessons preserved, all owned by "Default
+School", zero cross-school-resource Lessons found by direct inspection
+after migrating).
+
+Two additional, narrowly-scoped safeguards were added ahead of their
+originally planned phases, because Phase 3 is what first made them
+possible/necessary (see §17, §19, §20 for detail):
+
+- A Lesson-resource cross-school consistency guard
+  (`CrossSchoolLessonError`, enforced in `ScheduleService`) — a slice of
+  Phase 6, not the full lesson/scheduling access-control system.
+- School-scoped `list_teachers()`, threaded through
+  `SubstitutionService` and `ScheduleService.staff_schedule()` — a slice
+  of Phase 7, not the full Phase 4 authorization system (there is still
+  no current-school resolution).
+
 The next implementation step is:
 
-    Connect Teacher, Room, Subject, and StudentGroup to School
-
-Then:
-
-    Enforce school-wide data isolation
+    Enforce school-wide data isolation (Phase 4): resolve a current
+    school from the authenticated user, scope the remaining unscoped
+    queries and ModelChoiceFields, and add IDOR protection.
 
 Everything should be implemented incrementally and tested after each
 meaningful change.
