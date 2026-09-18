@@ -605,6 +605,16 @@ class ScheduleView(TemplateView):
             choice for choice in self.VIEW_CHOICES if choice.value != "whole_school"
         )
 
+    def _academic_years(self, current_school: Any) -> Any:
+        # Anonymous visitors and authenticated users with no resolvable
+        # current school keep today's public, unscoped behaviour — this
+        # view stays intentionally public (see PROJECT_CONTEXT.md).
+        # Only an authenticated principal with a current school gets
+        # its data restricted to that school.
+        if current_school is not None:
+            return AcademicYear.objects.filter(school=current_school)
+        return AcademicYear.objects.all()
+
     def _academic_year(self, academic_years: Any) -> AcademicYear | None:
         academic_year_id = self.request.GET.get("academic_year", "")
         if academic_year_id.isdigit():
@@ -615,34 +625,40 @@ class ScheduleView(TemplateView):
         # the domain grows explicit academic-year dates.
         return academic_years.first()
 
-    def _selector(self, current_view: str) -> ScheduleSelector | None:
+    def _selector(self, current_view: str, current_school: Any) -> ScheduleSelector | None:
         configuration = self.ENTITY_VIEWS.get(current_view)
         if configuration is None:
             return None
 
         selected = self.request.GET.get(current_view, "")
         model = configuration["model"]
-        if not selected.isdigit() or not model.objects.filter(pk=int(selected)).exists():
+        queryset = (
+            model.objects.filter(school=current_school)
+            if current_school is not None
+            else model.objects.all()
+        )
+        if not selected.isdigit() or not queryset.filter(pk=int(selected)).exists():
             selected = ""
         return ScheduleSelector(
             name=current_view,
             label=configuration["label"],
             placeholder=configuration["placeholder"],
-            options=model.objects.all(),
+            options=queryset,
             selected=selected,
         )
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         service = build_schedule_service()
+        current_school = CurrentSchoolService.resolve(self.request)
 
-        academic_years = AcademicYear.objects.all()
+        academic_years = self._academic_years(current_school)
         academic_year = self._academic_year(academic_years)
         requested_view = self.request.GET.get("view", "")
         view_choices = self._view_choices()
         valid_views = {choice.value for choice in view_choices}
         current_view = requested_view if requested_view in valid_views else ""
-        selector = self._selector(current_view)
+        selector = self._selector(current_view, current_school)
 
         waiting_for_view = not current_view
         waiting_for_selection = selector is not None and not selector.selected

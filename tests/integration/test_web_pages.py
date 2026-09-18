@@ -166,8 +166,7 @@ def test_academic_year_list_shows_school_column(authenticated_client):
 
 @pytest.mark.django_db
 def test_schedule_uses_period_columns_and_breaks(authenticated_client):
-    school = School.objects.create(name="Test School")
-    year = AcademicYear.objects.create(school=school, name="2026")
+    year = AcademicYear.objects.create(school=authenticated_client.school, name="2026")
     Period.objects.create(
         academic_year=year, name="Morning Break", order=1,
         start_time=time(10), end_time=time(10, 30), kind=Period.Kind.BREAK
@@ -269,9 +268,8 @@ def test_focused_timetable_uses_adaptive_lesson_cards(
 
 @pytest.mark.django_db
 def test_schedule_defaults_to_latest_academic_year(authenticated_client):
-    school = School.objects.create(name="Test School")
-    older = AcademicYear.objects.create(school=school, name="2025")
-    newer = AcademicYear.objects.create(school=school, name="2026")
+    older = AcademicYear.objects.create(school=authenticated_client.school, name="2025")
+    newer = AcademicYear.objects.create(school=authenticated_client.school, name="2026")
     Period.objects.create(
         academic_year=older,
         name="Old Period",
@@ -620,11 +618,10 @@ def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client
 
 @pytest.mark.django_db
 def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
-    school = School.objects.create(name="Test School")
-    AcademicYear.objects.create(school=school, name="2026")
-    Teacher.objects.create(school=school, name="Ada")
-    Room.objects.create(school=school, name="A101")
-    StudentGroup.objects.create(school=school, name="Grade 1")
+    AcademicYear.objects.create(school=authenticated_client.school, name="2026")
+    Teacher.objects.create(school=authenticated_client.school, name="Ada")
+    Room.objects.create(school=authenticated_client.school, name="A101")
+    StudentGroup.objects.create(school=authenticated_client.school, name="Grade 1")
 
     response = authenticated_client.get(reverse("schedule"), {"view": "teacher"})
 
