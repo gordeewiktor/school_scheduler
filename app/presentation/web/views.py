@@ -284,7 +284,7 @@ class AcademicYearListView(SchedulerListView):
     create_url_name = "academic-year-create"
     edit_url_name = "academic-year-update"
     delete_url_name = "academic-year-delete"
-    columns = [("name", "Name")]
+    columns = [("name", "Name"), ("school", "School")]
 
 
 class AcademicYearCreateView(SchedulerCreateView):

@@ -13,6 +13,7 @@ from app.infrastructure.database.models import (
     Lesson,
     Period,
     Room,
+    School,
     StudentGroup,
     Subject,
     Teacher,
@@ -124,7 +125,9 @@ class Command(BaseCommand):
         existing = AcademicYear.objects.first()
         if existing is not None:
             return existing
+        school, _ = School.objects.get_or_create(name="Demo School")
         return AcademicYear.objects.create(
+            school=school,
             name=self.ACADEMIC_YEAR_NAME,
             default_period_duration=45,
         )

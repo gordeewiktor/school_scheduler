@@ -258,20 +258,21 @@ The current models include:
 - Period
 - Lesson
 
-`School` and `SchoolMembership` are not yet connected to any of the
-other models (see §11–§12).
+`AcademicYear` is connected to `School` (required foreign key, see
+§10). `Teacher`, `Room`, `Subject`, and `StudentGroup` are not yet
+connected to `School` — that is Phase 3 (see §11–§12).
 
 ---
 
 # 9. Current Database Relationships
 
-The current application is effectively single-school.
-
 The current conceptual structure is approximately:
 
-    AcademicYear
+    School
         │
-        └── Period
+        └── AcademicYear
+                │
+                └── Period
 
     Teacher
     Room
@@ -286,10 +287,10 @@ The current conceptual structure is approximately:
         ├── Period
         └── planned substitute Teacher
 
-A `School` model and a `SchoolMembership` model (connecting a Django
-`User` to a `School`) now exist (see §11–§12). No other model yet has a
-foreign key to `School` — `AcademicYear`, `Teacher`, `Room`, `Subject`,
-and `StudentGroup` are still unscoped, as described below.
+`School` and `SchoolMembership` exist (see §11–§12). `AcademicYear` now
+has a required foreign key to `School` (see §10). `Teacher`, `Room`,
+`Subject`, and `StudentGroup` are still unscoped — that is Phase 3, not
+yet implemented.
 
 ---
 
@@ -297,30 +298,27 @@ and `StudentGroup` are still unscoped, as described below.
 
 AcademicYear currently contains:
 
+- school (ForeignKey to School, required, `on_delete=CASCADE`)
 - name
 - default_period_duration
 
-The current name is globally unique.
-
-The intended future relationship is:
-
-    School
-        │
-        └── AcademicYear
-                │
-                └── Period
-
-An AcademicYear should belong to exactly one School.
-
-Different schools should be allowed to have AcademicYears with the same
-name.
-
-For example:
+`name` is no longer globally unique. It is unique per School via a
+`UniqueConstraint(fields=["school", "name"])`. Different schools can
+have AcademicYears with the same name:
 
     School A → Academic Year 2026
     School B → Academic Year 2026
 
-should be valid.
+is valid.
+
+`AcademicYear.__str__()` returns `f"{self.name} ({self.school})"` so
+that same-named AcademicYears from different schools remain
+distinguishable in the admin, dropdowns, and templates.
+
+No school-scoping/authorization exists yet for AcademicYear access —
+the `AcademicYearForm`'s `school` field currently lists every School
+unscoped. Restricting it to the authenticated principal's school is
+Phase 4.
 
 ---
 
@@ -934,13 +932,16 @@ defined conceptually.
 The School + SchoolMembership foundation has been implemented (see
 §11–§12): the `School` and `SchoolMembership` models, an additive
 migration, admin registration, and a `create_school` management command
-(not yet executed against the development database).
+(not yet executed against the development database — the "principal"
+user is not yet attached to a school).
+
+`AcademicYear` now belongs to `School` (see §10): a required foreign
+key, per-school unique names, and the three-migration nullable →
+backfill → required sequence has been run against the real development
+database. Its one existing AcademicYear ("Demo 2026") is now owned by
+an auto-created "Default School".
 
 The next implementation step is:
-
-    Connect AcademicYear to School
-
-Then:
 
     Connect Teacher, Room, Subject, and StudentGroup to School
 

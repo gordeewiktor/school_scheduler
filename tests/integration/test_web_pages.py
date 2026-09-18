@@ -9,6 +9,7 @@ from app.infrastructure.database.models import (
     Lesson,
     Period,
     Room,
+    School,
     StudentGroup,
     Subject,
     Teacher,
@@ -35,7 +36,8 @@ def regular_client(client):
 
 @pytest.fixture
 def lesson_form_data(db):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     first = Period.objects.create(
         academic_year=year, name="Period 1", order=1,
         start_time=time(8), end_time=time(9)
@@ -82,7 +84,8 @@ def test_schedule_home_is_public(client):
 
 @pytest.mark.django_db
 def test_create_period_from_time_input(authenticated_client):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     response = authenticated_client.post(
         reverse("period-create"),
         {
@@ -100,7 +103,8 @@ def test_create_period_from_time_input(authenticated_client):
 
 @pytest.mark.django_db
 def test_invalid_period_time_returns_form_errors(authenticated_client):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     response = authenticated_client.post(
         reverse("period-create"),
         {
@@ -118,8 +122,47 @@ def test_invalid_period_time_returns_form_errors(authenticated_client):
 
 
 @pytest.mark.django_db
+def test_create_academic_year_requires_a_school(authenticated_client):
+    response = authenticated_client.post(
+        reverse("academic-year-create"),
+        {"name": "2026", "default_period_duration": 45},
+    )
+
+    assert response.status_code == 200
+    assert response.context["form"].errors["school"] == ["This field is required."]
+    assert not AcademicYear.objects.exists()
+
+
+@pytest.mark.django_db
+def test_create_academic_year_with_school_succeeds(authenticated_client):
+    school = School.objects.create(name="Test School")
+
+    response = authenticated_client.post(
+        reverse("academic-year-create"),
+        {"school": school.pk, "name": "2026", "default_period_duration": 45},
+    )
+
+    assert response.status_code == 302
+    year = AcademicYear.objects.get()
+    assert year.school == school
+    assert year.name == "2026"
+
+
+@pytest.mark.django_db
+def test_academic_year_list_shows_school_column(authenticated_client):
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2026")
+
+    response = authenticated_client.get(reverse("academic-year-list"))
+
+    assert response.status_code == 200
+    assert b"Test School" in response.content
+
+
+@pytest.mark.django_db
 def test_schedule_uses_period_columns_and_breaks(authenticated_client):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     Period.objects.create(
         academic_year=year, name="Morning Break", order=1,
         start_time=time(10), end_time=time(10, 30), kind=Period.Kind.BREAK
@@ -201,8 +244,9 @@ def test_focused_timetable_uses_adaptive_lesson_cards(
 
 @pytest.mark.django_db
 def test_schedule_defaults_to_latest_academic_year(authenticated_client):
-    older = AcademicYear.objects.create(name="2025")
-    newer = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    older = AcademicYear.objects.create(school=school, name="2025")
+    newer = AcademicYear.objects.create(school=school, name="2026")
     Period.objects.create(
         academic_year=older,
         name="Old Period",
@@ -534,7 +578,8 @@ def test_existing_lesson_editing_continues_to_update_core_fields(
 
 @pytest.mark.django_db
 def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client):
-    AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2026")
 
     response = authenticated_client.get(reverse("schedule"))
 
@@ -548,7 +593,8 @@ def test_schedule_starts_with_view_choices_and_no_timetable(authenticated_client
 
 @pytest.mark.django_db
 def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
-    AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2026")
     Teacher.objects.create(name="Ada")
     Room.objects.create(name="A101")
     StudentGroup.objects.create(name="Grade 1")
@@ -617,7 +663,8 @@ def test_public_user_cannot_access_administration_pages(client):
 
 @pytest.mark.django_db
 def test_public_user_can_access_focused_schedule(client):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     teacher = Teacher.objects.create(name="Ada")
 
     response = client.get(
@@ -631,7 +678,8 @@ def test_public_user_can_access_focused_schedule(client):
 
 @pytest.mark.django_db
 def test_public_user_can_access_student_group_and_room_schedules(client):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     student_group = StudentGroup.objects.create(name="Grade 1")
     room = Room.objects.create(name="A101")
 
@@ -658,7 +706,8 @@ def test_public_user_can_access_student_group_and_room_schedules(client):
 
 @pytest.mark.django_db
 def test_public_user_cannot_access_whole_school_schedule(client):
-    AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2026")
 
     response = client.get(reverse("schedule"), {"view": "whole_school"})
 

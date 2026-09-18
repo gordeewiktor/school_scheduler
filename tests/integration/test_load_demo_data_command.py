@@ -10,6 +10,7 @@ from app.infrastructure.database.models import (
     Lesson,
     Period,
     Room,
+    School,
     StudentGroup,
     Subject,
     Teacher,
@@ -90,7 +91,8 @@ def test_load_demo_data_creates_complete_master_data():
 
 @pytest.mark.django_db
 def test_load_demo_data_is_idempotent_and_reuses_existing_academic_year():
-    AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2026")
 
     call_command("load_demo_data", stdout=StringIO())
     call_command("load_demo_data", stdout=StringIO())
@@ -171,7 +173,8 @@ def test_load_demo_data_rerun_does_not_duplicate_lessons():
 
 @pytest.mark.django_db
 def test_load_demo_data_uses_only_demo_master_data_for_generated_timetable():
-    AcademicYear.objects.create(name="2027")
+    school = School.objects.create(name="Test School")
+    AcademicYear.objects.create(school=school, name="2027")
     Teacher.objects.create(name="Manual Teacher")
     StudentGroup.objects.create(name="Manual Class")
     Room.objects.create(name="Manual Room")

@@ -30,9 +30,11 @@ class SchoolMembershipAdmin(admin.ModelAdmin):
 
 @admin.register(AcademicYear)
 class AcademicYearAdmin(admin.ModelAdmin):
-    list_display = ["name", "default_period_duration"]
-    search_fields = ["name"]
-    ordering = ["-name"]
+    list_display = ["name", "school", "default_period_duration"]
+    list_filter = ["school"]
+    search_fields = ["name", "school__name"]
+    list_select_related = ["school"]
+    ordering = ["school", "-name"]
 
 
 @admin.register(Teacher)

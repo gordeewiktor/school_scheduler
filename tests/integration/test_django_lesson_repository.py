@@ -6,13 +6,22 @@ from app.application.services.conflicts import ConflictService
 from app.application.services.schedules import ScheduleService
 from app.domain.exceptions import InvalidLessonPlacementError, ScheduleConflictError
 from app.domain.models import Day, Lesson as DomainLesson
-from app.infrastructure.database.models import AcademicYear, Period, Room, StudentGroup, Subject, Teacher
+from app.infrastructure.database.models import (
+    AcademicYear,
+    Period,
+    Room,
+    School,
+    StudentGroup,
+    Subject,
+    Teacher,
+)
 from app.infrastructure.repositories.django_lessons import DjangoLessonRepository
 
 
 @pytest.fixture
 def school_data(db):
-    year = AcademicYear.objects.create(name="2026")
+    school = School.objects.create(name="Test School")
+    year = AcademicYear.objects.create(school=school, name="2026")
     periods = [
         Period.objects.create(academic_year=year, name="Period 1", order=1, start_time=time(8), end_time=time(9)),
         Period.objects.create(academic_year=year, name="Period 2", order=2, start_time=time(9), end_time=time(10)),

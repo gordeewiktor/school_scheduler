@@ -47,7 +47,7 @@ class StudentGroupForm(BaseStyledModelForm):
 class AcademicYearForm(BaseStyledModelForm):
     class Meta:
         model = AcademicYear
-        fields = ["name", "default_period_duration"]
+        fields = ["school", "name", "default_period_duration"]
 
 
 class PeriodForm(BaseStyledModelForm):

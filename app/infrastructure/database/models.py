@@ -45,15 +45,23 @@ class SchoolMembership(models.Model):
 
 
 class AcademicYear(models.Model):
-    name = models.CharField(max_length=40, unique=True)
+    school = models.ForeignKey(
+        School, on_delete=models.CASCADE, related_name="academic_years"
+    )
+    name = models.CharField(max_length=40)
     default_period_duration = models.PositiveIntegerField(default=45)
 
     class Meta:
         app_label = "app"
-        ordering = ["-name"]
+        ordering = ["school", "-name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["school", "name"], name="unique_academic_year_name_per_school"
+            )
+        ]
 
     def __str__(self) -> str:
-        return self.name
+        return f"{self.name} ({self.school})"
 
 
 class Teacher(models.Model):

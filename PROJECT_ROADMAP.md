@@ -134,29 +134,45 @@ business rules.
 
 ## Database
 
-- [ ] Add `school` ForeignKey to `AcademicYear`.
-- [ ] Create migration.
-- [ ] Create/backfill the initial/default school.
-- [ ] Assign existing AcademicYear records to the appropriate school.
-- [ ] Make `AcademicYear.school` required.
-- [ ] Replace global AcademicYear name uniqueness with per-school
-      uniqueness.
+- [x] Add `school` ForeignKey to `AcademicYear`.
+- [x] Create migration (split into three: nullable add, data backfill,
+      then required + constraint — `0007`, `0008`, `0009`).
+- [x] Create/backfill the initial/default school (data migration
+      `get_or_create`s a "Default School" for any orphaned rows).
+- [x] Assign existing AcademicYear records to the appropriate school
+      (verified against the real dev database: the existing "Demo 2026"
+      AcademicYear is now owned by "Default School").
+- [x] Make `AcademicYear.school` required.
+- [x] Replace global AcademicYear name uniqueness with per-school
+      uniqueness (`UniqueConstraint(school, name)`).
 
 ## Application
 
-- [ ] Update AcademicYear forms.
-- [ ] Update AcademicYear views.
-- [ ] Update AcademicYear services/use cases if necessary.
-- [ ] Update repositories if necessary.
+- [x] Update AcademicYear forms (`AcademicYearForm` now includes
+      `school`, unscoped — any school can be picked; scoping is Phase 4).
+- [x] Update AcademicYear views (`AcademicYearListView` shows a School
+      column).
+- [x] Update AcademicYear services/use cases if necessary — not needed;
+      `ScheduleService`/`ConflictService`/`SubstitutionService` only ever
+      operate on an opaque `academic_year_id`.
+- [x] Update repositories if necessary — not needed, same reason.
 - [ ] Ensure a principal can only access AcademicYears belonging to
-      their school.
+      their school — intentionally deferred to Phase 4
+      (school resolution/scoping is out of scope for this slice).
 
 ## Tests
 
-- [ ] Test AcademicYear belongs to School.
-- [ ] Test per-school AcademicYear name uniqueness.
-- [ ] Test School A cannot access School B's AcademicYear.
-- [ ] Update existing fixtures.
+- [x] Test AcademicYear belongs to School (`IntegrityError` without one).
+- [x] Test per-school AcademicYear name uniqueness.
+- [x] Test different schools can share an AcademicYear name.
+- [x] Test the data-migration backfill itself, using Django's
+      `MigrationExecutor` against historical model states (not just the
+      end state) — covers a single orphaned row and multiple orphaned
+      rows sharing one "Default School".
+- [x] Update existing fixtures (5 test files, ~15 call sites updated to
+      pass an explicit `school=`).
+- [ ] Test School A cannot access School B's AcademicYear — deferred to
+      Phase 4 along with school-scoped access itself.
 
 ---
 
@@ -530,17 +546,21 @@ Implement the next small architectural step toward multi-school support.
 
 ## Current status
 
-Phase 1's School/SchoolMembership foundation has been implemented
-(models, migration, admin, `create_school` command, tests) but not yet
-committed. The existing "principal" user has not yet been attached to a
-school — `create_school` has been written but intentionally not run.
+Phase 1 (School/SchoolMembership foundation) and Phase 2 (AcademicYear
+→ School ownership) have both been implemented and verified. Neither
+slice has been committed yet. The existing "principal" user still has
+not been attached to a school — `create_school` remains written but
+intentionally not run. The real dev database has been migrated through
+`0009`; its one existing AcademicYear ("Demo 2026") is now owned by an
+auto-created "Default School".
 
 ## Immediate next step
 
-1. Review the diff.
+1. Review the diff for both the Phase 1 and Phase 2 slices.
 2. Decide whether/when to run `create_school` against the dev database.
-3. Commit this slice.
-4. Move to Phase 2 (connect `AcademicYear` to `School`).
+3. Commit.
+4. Move to Phase 3 (connect Teacher, Room, Subject, StudentGroup to
+   School).
 
 ---
 
@@ -620,3 +640,65 @@ committed, and the existing user has not yet been attached to a school.
 
 Review the diff, decide whether/when to run `create_school` against the
 dev database, then move to Phase 2 (connect `AcademicYear` to `School`).
+
+## 2026-09-17 (continued) — Phase 2: AcademicYear → School
+
+### Completed
+
+- Added `AcademicYear.school` as a required `ForeignKey` to `School`
+  (`on_delete=CASCADE`), replaced the global `unique=True` on `name`
+  with a `UniqueConstraint(school, name)`, updated `Meta.ordering` to
+  `["school", "-name"]`, and changed `__str__` to
+  `f"{self.name} ({self.school})"` for disambiguation.
+- Split the schema change into three migrations, per the documented
+  strategy (§22 of `PROJECT_CONTEXT.md`):
+  - `0007_academicyear_school_nullable` — add `school`, nullable.
+  - `0008_backfill_academicyear_school` — `RunPython` data migration:
+    any `AcademicYear` with no school is assigned to a `get_or_create`d
+    "Default School".
+  - `0009_academicyear_school_required` — make `school` required, swap
+    the uniqueness constraint.
+- Updated `AcademicYearForm` to expose `school` as a field (unscoped —
+  lists all schools; scoping is Phase 4), otherwise the create/update
+  views would fail to save.
+- Updated `AcademicYearListView` and `AcademicYearAdmin` to show/filter
+  by `school`.
+- Updated `load_demo_data._load_academic_year()` to `get_or_create` a
+  "Demo School" when creating a fresh AcademicYear (only affects a
+  brand-new database — on the real dev DB the existing AcademicYear is
+  reused as before).
+- Confirmed `ScheduleService`, `ConflictService`, `SubstitutionService`,
+  and `DjangoLessonRepository` need no changes — they only ever handle
+  an opaque `academic_year_id`.
+- Updated every existing `AcademicYear.objects.create(...)` call across
+  5 test files (~15 call sites) to pass an explicit `school=`.
+- Added `tests/infrastructure/test_academic_year_school.py` (required
+  FK, per-school uniqueness, cross-school duplicate names allowed,
+  cascade delete, `__str__` format) and
+  `tests/integration/test_academic_year_school_migration.py` (tests the
+  `0008` data migration itself via Django's `MigrationExecutor` against
+  historical model states — single and multiple orphaned rows).
+- Added 3 new web tests covering `AcademicYearForm`/`AcademicYearCreateView`
+  with the new required `school` field, and the list view's School column.
+- Verification performed:
+  - `makemigrations --check --dry-run` → no changes detected.
+  - `manage.py check` → no issues.
+  - Full pytest suite → 130 passed, 1 pre-existing failure unrelated to
+    this change (`test_administrator_navigation`, same failure present
+    on the base branch before Phase 1/2 work).
+  - Applied `0006`–`0009` to the real dev `db.sqlite3` (a backup was
+    taken beforehand and removed after verifying success). Confirmed
+    afterward: 1 `School` ("Default School"), the existing "Demo 2026"
+    `AcademicYear` now owned by it, and Teacher/Room/Subject/
+    StudentGroup/Lesson counts unchanged (80/42/10/42/2100).
+- No changes made to Teacher, Room, Subject, StudentGroup, Lesson,
+  repositories, services, or authentication/authorization logic.
+
+### Current task
+
+Phase 1 and Phase 2 are both implemented and verified but not committed.
+
+### Next
+
+Review the diff, decide on committing, then move to Phase 3 (connect
+Teacher, Room, Subject, and StudentGroup to School).

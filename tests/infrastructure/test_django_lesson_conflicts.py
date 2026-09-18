@@ -7,6 +7,7 @@ from app.infrastructure.database.models import (
     Lesson,
     Period,
     Room,
+    School,
     StudentGroup,
     Subject,
     Teacher,
@@ -16,7 +17,8 @@ from app.infrastructure.repositories.django_lessons import DjangoLessonRepositor
 
 @pytest.mark.django_db
 def test_list_lessons_for_substitute_returns_only_assigned_lessons():
-    academic_year = AcademicYear.objects.create(name="2026/2027")
+    school = School.objects.create(name="Test School")
+    academic_year = AcademicYear.objects.create(school=school, name="2026/2027")
 
     period = Period.objects.create(
         academic_year=academic_year,
