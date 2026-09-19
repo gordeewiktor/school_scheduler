@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import time
 
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from app.application.services.conflicts import ConflictService
+from app.application.services.registration import register_principal
 from app.application.services.schedules import ScheduleService
 from app.application.services.substitution_service import SubstitutionService
 from app.infrastructure.database.models import (
@@ -14,6 +16,7 @@ from app.infrastructure.database.models import (
     Period,
     Room,
     School,
+    SchoolMembership,
     StudentGroup,
     Subject,
     Teacher,
@@ -30,9 +33,24 @@ class DemoPeriod:
     kind: str
 
 
-class Command(BaseCommand):
-    help = "Load complete demo school data, including a generated timetable."
+@dataclass(frozen=True, slots=True)
+class DemoSchoolSpec:
+    school_name: str
+    username: str
+    password: str
 
+
+class Command(BaseCommand):
+    help = (
+        "Load demo data for two independent, isolated demo schools — "
+        "useful for manually exercising the multi-school application."
+    )
+
+    # Deliberately identical across both demo schools — this is what
+    # lets the loaded data demonstrate that same-named records
+    # (academic year, teachers, subjects, rooms, student groups) stay
+    # fully independent once they belong to different Schools. Only
+    # the School name and principal login differ per school.
     ACADEMIC_YEAR_NAME = "Demo 2026"
 
     SUBJECTS = (
@@ -63,75 +81,118 @@ class Command(BaseCommand):
         DemoPeriod("After School", time(15, 50), time(16, 30), Period.Kind.LESSON),
     )
 
+    # 10 rooms/groups (matched 1:1 — the timetable generator dedicates
+    # one room per student group for the whole week) and 16 teachers
+    # (more than the 10 needed at any single moment, so some teachers
+    # are always free — enough to make substitution generation
+    # meaningful rather than trivially empty).
+    TEACHER_NAMES = (
+        "Alice Chen", "Ben Carter", "Carla Diaz", "David Kim",
+        "Ella Brown", "Frank Lopez", "Grace Kim", "Henry Wolfe",
+        "Ivy Novak", "Jack Ortiz", "Kelly Adams", "Liam Young",
+        "Maya Patel", "Noah Scott", "Olivia Reyes", "Peter Hughes",
+    )
+    ROOM_NAMES = (
+        "Room 101", "Room 102", "Room 103", "Room 104", "Room 105",
+        "Lab 1", "Lab 2", "Gym", "Art Studio", "Library",
+    )
+    STUDENT_GROUP_NAMES = (
+        "Grade 7A", "Grade 7B", "Grade 8A", "Grade 8B",
+        "Grade 9A", "Grade 9B", "Grade 10A", "Grade 10B",
+        "Grade 11A", "Grade 11B",
+    )
+
+    DEMO_SCHOOLS = (
+        DemoSchoolSpec("Riverside High", "principal_riverside", "Demo-Pass-2026!"),
+        DemoSchoolSpec("Lincoln Academy", "principal_lincoln", "Demo-Pass-2026!"),
+    )
+
     def handle(self, *args, **options) -> None:
-        self.stdout.write("Loading demo school...")
+        self.stdout.write("Loading demo data for two independent schools...")
         self.stdout.write("")
 
-        self.stdout.write("Creating academic year and periods...")
-        academic_year = self._load_academic_year()
-        school = academic_year.school
+        for spec in self.DEMO_SCHOOLS:
+            self._load_school(spec)
+
+        self.stdout.write(self.style.SUCCESS("All demo schools loaded successfully."))
+        self.stdout.write("")
+        self.stdout.write("Login credentials:")
+        for spec in self.DEMO_SCHOOLS:
+            self.stdout.write(f"  {spec.school_name}: {spec.username} / {spec.password}")
+
+    def _load_school(self, spec: DemoSchoolSpec) -> None:
+        self.stdout.write(f"=== {spec.school_name} ===")
+
+        school = self._load_school_and_principal(spec)
+        academic_year = self._load_academic_year(school)
         self._load_periods(academic_year)
-        self.stdout.write(self.style.SUCCESS("OK"))
-
-        self.stdout.write("Creating teachers...")
         self._load_teachers(school)
-        self.stdout.write(self.style.SUCCESS("OK"))
-
-        self.stdout.write("Creating student groups...")
         self._load_student_groups(school)
-        self.stdout.write(self.style.SUCCESS("OK"))
-
-        self.stdout.write("Creating rooms...")
         self._load_rooms(school)
-        self.stdout.write(self.style.SUCCESS("OK"))
-
-        self.stdout.write("Creating subjects...")
         self._load_subjects(school)
-        self.stdout.write(self.style.SUCCESS("OK"))
 
         self.stdout.write("Generating timetable...")
         self._clear_lessons(academic_year)
         result = self._generate_timetable(academic_year)
-        self.stdout.write(self.style.SUCCESS("########## 100%"))
         self.stdout.write(f"Lessons created: {result.lessons_created}")
 
         self.stdout.write("Generating planned substitutions...")
         self._substitution_service().generate_planned_substitutions(academic_year.id)
-        self.stdout.write(self.style.SUCCESS("OK"))
-        self.stdout.write("")
 
-        self.stdout.write(self.style.SUCCESS("Demo school loaded successfully."))
-        self.stdout.write("")
-        self.stdout.write(f"Academic years: {AcademicYear.objects.count()}")
-        self.stdout.write(f"Teachers: {Teacher.objects.count()}")
-        self.stdout.write(f"Student groups: {StudentGroup.objects.count()}")
-        self.stdout.write(f"Rooms: {Room.objects.count()}")
-        self.stdout.write(f"Subjects: {Subject.objects.count()}")
+        self.stdout.write(self.style.SUCCESS(f"{spec.school_name}: OK"))
+        self.stdout.write(f"  Login: {spec.username} / {spec.password}")
+        self.stdout.write(f"  Teachers: {Teacher.objects.filter(school=school).count()}")
         self.stdout.write(
-            "Periods: "
+            f"  Student groups: {StudentGroup.objects.filter(school=school).count()}"
+        )
+        self.stdout.write(f"  Rooms: {Room.objects.filter(school=school).count()}")
+        self.stdout.write(f"  Subjects: {Subject.objects.filter(school=school).count()}")
+        self.stdout.write(
+            "  Periods: "
             f"{Period.objects.filter(academic_year=academic_year, kind=Period.Kind.LESSON).count()}"
         )
         self.stdout.write(
-            "Breaks: "
+            "  Breaks: "
             f"{Period.objects.filter(academic_year=academic_year, kind=Period.Kind.BREAK).count()}"
         )
         self.stdout.write(
-            "Lessons: "
+            "  Lessons: "
             f"{Lesson.objects.filter(start_period__academic_year=academic_year).count()}"
         )
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS("Done."))
 
-    def _load_academic_year(self) -> AcademicYear:
-        existing = AcademicYear.objects.first()
-        if existing is not None:
-            return existing
-        school, _ = School.objects.get_or_create(name="Demo School")
-        return AcademicYear.objects.create(
+    def _load_school_and_principal(self, spec: DemoSchoolSpec) -> School:
+        """Idempotent: if this demo principal's username already
+        exists, reuse the School they were originally registered
+        with (looked up via their own PRINCIPAL SchoolMembership) —
+        never a fresh School, and never any other pre-existing School
+        or AcademicYear in the database. Only on a genuinely first run
+        does this create a new User/School/SchoolMembership, via the
+        same register_principal() atomic operation the web
+        registration flow uses.
+        """
+        User = get_user_model()
+        existing_user = User.objects.filter(username=spec.username).first()
+        if existing_user is not None:
+            membership = SchoolMembership.objects.get(
+                user=existing_user, role=SchoolMembership.Role.PRINCIPAL
+            )
+            return membership.school
+
+        _user, school, _membership = register_principal(
+            username=spec.username,
+            password=spec.password,
+            school_name=spec.school_name,
+        )
+        return school
+
+    def _load_academic_year(self, school: School) -> AcademicYear:
+        academic_year, _created = AcademicYear.objects.get_or_create(
             school=school,
             name=self.ACADEMIC_YEAR_NAME,
-            default_period_duration=45,
+            defaults={"default_period_duration": 45},
         )
+        return academic_year
 
     def _load_periods(self, academic_year: AcademicYear) -> None:
         for order, period in enumerate(self.PERIODS, start=1):
@@ -147,35 +208,27 @@ class Command(BaseCommand):
             )
 
     def _load_teachers(self, school: School) -> None:
-        for index in range(1, 81):
+        for name in self.TEACHER_NAMES:
             Teacher.objects.update_or_create(
-                school=school,
-                name=f"Teacher {index:02d}",
-                defaults={"email": ""},
+                school=school, name=name, defaults={"email": ""}
             )
 
     def _load_student_groups(self, school: School) -> None:
-        for index in range(1, 51):
+        for name in self.STUDENT_GROUP_NAMES:
             StudentGroup.objects.update_or_create(
-                school=school,
-                name=f"Class {index:02d}",
-                defaults={"size": None},
+                school=school, name=name, defaults={"size": None}
             )
 
     def _load_rooms(self, school: School) -> None:
-        for index in range(1, 51):
+        for name in self.ROOM_NAMES:
             Room.objects.update_or_create(
-                school=school,
-                name=f"Room {index:02d}",
-                defaults={"capacity": None},
+                school=school, name=name, defaults={"capacity": None}
             )
 
     def _load_subjects(self, school: School) -> None:
         for name, code in self.SUBJECTS:
             Subject.objects.update_or_create(
-                school=school,
-                name=name,
-                defaults={"code": code},
+                school=school, name=name, defaults={"code": code}
             )
 
     def _clear_lessons(self, academic_year: AcademicYear) -> None:
@@ -201,27 +254,26 @@ class Command(BaseCommand):
     def _substitution_service() -> SubstitutionService:
         return SubstitutionService(DjangoLessonRepository())
 
-    @staticmethod
-    def _demo_teachers(school: School) -> list[Teacher]:
-        names = [f"Teacher {index:02d}" for index in range(1, 81)]
+    def _demo_teachers(self, school: School) -> list[Teacher]:
         return list(
-            Teacher.objects.filter(school=school, name__in=names).order_by("name")
+            Teacher.objects.filter(
+                school=school, name__in=self.TEACHER_NAMES
+            ).order_by("name")
         )
 
-    @staticmethod
-    def _demo_student_groups(school: School) -> list[StudentGroup]:
-        names = [f"Class {index:02d}" for index in range(1, 51)]
+    def _demo_student_groups(self, school: School) -> list[StudentGroup]:
         return list(
-            StudentGroup.objects.filter(school=school, name__in=names).order_by("name")
+            StudentGroup.objects.filter(
+                school=school, name__in=self.STUDENT_GROUP_NAMES
+            ).order_by("name")
         )
 
-    @staticmethod
-    def _demo_rooms(school: School) -> list[Room]:
-        names = [f"Room {index:02d}" for index in range(1, 51)]
-        return list(Room.objects.filter(school=school, name__in=names).order_by("name"))
+    def _demo_rooms(self, school: School) -> list[Room]:
+        return list(
+            Room.objects.filter(school=school, name__in=self.ROOM_NAMES).order_by("name")
+        )
 
     def _demo_subjects(self, school: School) -> list[Subject]:
         return [
-            Subject.objects.get(school=school, name=name)
-            for name, _code in self.SUBJECTS
+            Subject.objects.get(school=school, name=name) for name, _code in self.SUBJECTS
         ]
