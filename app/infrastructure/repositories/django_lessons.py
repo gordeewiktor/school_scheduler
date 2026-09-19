@@ -1,6 +1,6 @@
 from django.db.models import Q
 
-from app.application.ports.repositories import ResourceSchoolIds, ScheduledLesson
+from app.application.ports.repositories import PeriodSpec, ResourceSchoolIds, ScheduledLesson
 from app.domain.models import (
     Day,
     Lesson as DomainLesson,
@@ -71,6 +71,24 @@ class DjangoLessonRepository:
             period.to_domain()
             for period in Period.objects.filter(academic_year_id=academic_year_id).order_by("order")
         ]
+
+    def create_periods(
+        self, academic_year_id: int, specs: list[PeriodSpec]
+    ) -> list[DomainPeriod]:
+        instances = Period.objects.bulk_create(
+            [
+                Period(
+                    academic_year_id=academic_year_id,
+                    name=spec.name,
+                    order=spec.order,
+                    start_time=spec.start_time,
+                    end_time=spec.end_time,
+                    kind=spec.kind.value,
+                )
+                for spec in specs
+            ]
+        )
+        return [instance.to_domain() for instance in instances]
 
     def list_potential_conflicts(self, request: LessonRequest) -> list[ExistingLesson]:
         teacher_occupancy_query = Q(teacher_id=request.teacher_id) | Q(

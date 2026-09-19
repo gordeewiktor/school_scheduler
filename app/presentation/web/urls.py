@@ -65,6 +65,7 @@ legacy_management_urlpatterns = [
     path("legacy/periods/new/", views.PeriodCreateView.as_view(), name="period-create"),
     path("legacy/periods/<int:pk>/edit/", views.PeriodUpdateView.as_view(), name="period-update"),
     path("legacy/periods/<int:pk>/delete/", views.PeriodDeleteView.as_view(), name="period-delete"),
+    path("legacy/periods/generate/", views.PeriodGenerationView.as_view(), name="period-generate"),
 ]
 
 urlpatterns += legacy_management_urlpatterns

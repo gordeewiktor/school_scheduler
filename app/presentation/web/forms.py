@@ -1,5 +1,6 @@
 from django import forms
 
+from app.application.services.period_generation import BreakAfter
 from app.domain.models import Day
 from app.infrastructure.database.models import (
     AcademicYear,
@@ -84,6 +85,75 @@ class PeriodForm(BaseStyledModelForm):
         if order < 1:
             raise forms.ValidationError("Order must be at least 1.")
         return order
+
+
+class GeneratePeriodsForm(forms.Form):
+    academic_year = forms.ModelChoiceField(
+        queryset=AcademicYear.objects.none(),
+        label="Academic year",
+        help_text="Only academic years with no periods yet are offered.",
+    )
+    lesson_count = forms.IntegerField(
+        min_value=1, max_value=20, label="Number of lesson periods"
+    )
+    first_start_time = forms.TimeField(
+        widget=forms.TimeInput(attrs={"type": "time"}), label="First period start time"
+    )
+    lesson_duration_minutes = forms.IntegerField(
+        min_value=1, initial=45, label="Lesson duration (minutes)"
+    )
+    breaks = forms.CharField(
+        required=False,
+        label="Breaks",
+        help_text=(
+            'Optional. Comma-separated "after:minutes" pairs, e.g. "2:10, 4:10" '
+            "means a 10-minute break after lesson period 2 and another after "
+            "lesson period 4."
+        ),
+    )
+
+    def __init__(self, *args, school=None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Fail closed: with no school, offer no academic years at all
+        # rather than falling back to every school's. Years that
+        # already have periods are never offered — generation must
+        # never silently overwrite an existing set (Lessons reference
+        # Periods).
+        self.fields["academic_year"].queryset = AcademicYear.objects.filter(
+            school=school, periods__isnull=True
+        )
+        for field in self.fields.values():
+            field.widget.attrs.setdefault(
+                "class",
+                "form-select" if isinstance(field.widget, forms.Select) else "form-control",
+            )
+
+    def clean_breaks(self) -> list[BreakAfter]:
+        raw = self.cleaned_data.get("breaks", "").strip()
+        if not raw:
+            return []
+
+        breaks: list[BreakAfter] = []
+        for chunk in raw.split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            parts = chunk.split(":")
+            if len(parts) != 2:
+                raise forms.ValidationError(
+                    f'Could not parse "{chunk}". Use "after:minutes", e.g. "2:10".'
+                )
+            position_raw, duration_raw = (part.strip() for part in parts)
+            if not position_raw.isdigit() or not duration_raw.isdigit():
+                raise forms.ValidationError(
+                    f'Could not parse "{chunk}". Both values must be whole numbers.'
+                )
+            breaks.append(
+                BreakAfter(
+                    after_period=int(position_raw), duration_minutes=int(duration_raw)
+                )
+            )
+        return breaks
 
 
 class LessonForm(BaseStyledModelForm):

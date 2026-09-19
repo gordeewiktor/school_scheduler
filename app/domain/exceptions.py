@@ -32,6 +32,16 @@ class SchoolAuthorizationError(DomainError):
     """
 
 
+class PeriodsAlreadyExistError(DomainError):
+    """Raised when period generation is attempted for an AcademicYear
+    that already has at least one Period.
+
+    Generation is intentionally not a destructive/regenerating
+    operation: Lessons reference Periods, so silently replacing an
+    existing set could orphan or corrupt scheduled lessons.
+    """
+
+
 class ScheduleConflictError(DomainError):
     """Raised when a lesson would conflict with an existing lesson."""
 

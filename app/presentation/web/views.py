@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Any
-from app.presentation.web.dependencies import build_schedule_service, build_substitution_service
+from app.presentation.web.dependencies import (
+    build_period_generation_service,
+    build_schedule_service,
+    build_substitution_service,
+)
 
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -16,6 +20,8 @@ from django.views.generic import CreateView, DeleteView, ListView, TemplateView,
 from app.domain.exceptions import (
     CrossSchoolLessonError,
     InvalidLessonPlacementError,
+    InvalidPeriodError,
+    PeriodsAlreadyExistError,
     ScheduleConflictError,
     SchoolAuthorizationError,
 )
@@ -36,6 +42,7 @@ from app.presentation.web.forms import (
     SubjectForm,
     TeacherForm,
     AcademicYearForm,
+    GeneratePeriodsForm,
     PeriodForm,
     TeacherSubstitutionForm,
 )
@@ -372,6 +379,7 @@ class PeriodListView(SchedulerListView):
     model = Period
     queryset = Period.objects.select_related("academic_year")
     school_filter_lookup = "academic_year__school"
+    template_name = "scheduler/period_list.html"
     title = "Periods"
     create_url_name = "period-create"
     edit_url_name = "period-update"
@@ -406,6 +414,50 @@ class PeriodDeleteView(SchedulerDeleteView):
     school_filter_lookup = "academic_year__school"
     title = "Delete Period"
     list_url_name = "period-list"
+
+
+class PeriodGenerationView(SchoolAccessRequiredMixin, View):
+    template_name = "scheduler/generate_periods.html"
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        form = GeneratePeriodsForm(school=self.current_school)
+        return self._render(request, form)
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        form = GeneratePeriodsForm(request.POST, school=self.current_school)
+        if form.is_valid():
+            try:
+                build_period_generation_service().generate(
+                    academic_year_id=form.cleaned_data["academic_year"].pk,
+                    school_id=self.current_school.id,
+                    lesson_count=form.cleaned_data["lesson_count"],
+                    first_start_time=form.cleaned_data["first_start_time"],
+                    lesson_duration_minutes=form.cleaned_data["lesson_duration_minutes"],
+                    breaks=form.cleaned_data["breaks"],
+                )
+            except (SchoolAuthorizationError, PeriodsAlreadyExistError, InvalidPeriodError) as exc:
+                form.add_error(None, str(exc))
+            else:
+                messages.success(request, "Periods generated.")
+                return redirect("period-list")
+        return self._render(request, form)
+
+    def _render(self, request: HttpRequest, form: GeneratePeriodsForm) -> HttpResponse:
+        durations = dict(
+            AcademicYear.objects.filter(
+                school=self.current_school, periods__isnull=True
+            ).values_list("id", "default_period_duration")
+        )
+        return render(
+            request,
+            self.template_name,
+            {
+                "form": form,
+                "title": "Generate Periods",
+                "list_url_name": "period-list",
+                "academic_year_durations": {str(k): v for k, v in durations.items()},
+            },
+        )
 
 
 class LessonListView(SchedulerListView):

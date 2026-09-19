@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import time
 from typing import Protocol
 
-from app.domain.models import Day, Lesson, Period, Teacher
+from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import ExistingLesson, LessonRequest
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodSpec:
+    """A not-yet-persisted period, computed by PeriodGenerationService.
+
+    Distinct from the domain `Period` dataclass, which requires a real
+    `id` and therefore only represents already-persisted periods.
+    """
+
+    order: int
+    name: str
+    start_time: time
+    end_time: time
+    kind: PeriodKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +67,10 @@ class LessonRepository(Protocol):
     def get_period(self, period_id: int) -> Period | None: ...
 
     def list_periods(self, academic_year_id: int) -> list[Period]: ...
+
+    def create_periods(
+        self, academic_year_id: int, specs: list[PeriodSpec]
+    ) -> list[Period]: ...
 
     def list_potential_conflicts(self, request: LessonRequest) -> list[ExistingLesson]: ...
 

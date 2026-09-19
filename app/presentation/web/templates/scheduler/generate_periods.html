@@ -1,0 +1,22 @@
+{% extends "scheduler/object_form.html" %}
+
+{% block extra_content %}
+{{ academic_year_durations|json_script:"academic-year-durations" }}
+<script>
+(function () {
+    var durationsEl = document.getElementById("academic-year-durations");
+    var yearSelect = document.getElementById("id_academic_year");
+    var durationInput = document.getElementById("id_lesson_duration_minutes");
+    if (!durationsEl || !yearSelect || !durationInput) {
+        return;
+    }
+    var durations = JSON.parse(durationsEl.textContent);
+    yearSelect.addEventListener("change", function () {
+        var duration = durations[yearSelect.value];
+        if (duration !== undefined) {
+            durationInput.value = duration;
+        }
+    });
+})();
+</script>
+{% endblock %}
