@@ -41,6 +41,7 @@ class DjangoLessonRepository:
         subject_id: int,
         student_group_id: int,
         period_id: int,
+        planned_substitute_id: int | None = None,
     ) -> ResourceSchoolIds:
         return ResourceSchoolIds(
             teacher_school_id=Teacher.objects.filter(pk=teacher_id)
@@ -58,6 +59,13 @@ class DjangoLessonRepository:
             period_school_id=Period.objects.filter(pk=period_id)
             .values_list("academic_year__school_id", flat=True)
             .first(),
+            planned_substitute_school_id=(
+                Teacher.objects.filter(pk=planned_substitute_id)
+                .values_list("school_id", flat=True)
+                .first()
+                if planned_substitute_id is not None
+                else None
+            ),
         )
 
     def get_period(self, period_id: int) -> DomainPeriod | None:

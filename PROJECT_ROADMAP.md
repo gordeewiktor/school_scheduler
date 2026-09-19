@@ -554,8 +554,12 @@ model already represents the required information.
 
 ## Lessons
 
-- [ ] Ensure lessons are accessible only within the current school
-      (needs Phase 4's current-school resolution; not done).
+- [x] Ensure lessons are accessible only within the current school.
+      Established by Phase 4B/4C (`SchoolScopedQuerysetMixin` on
+      `LessonListView`/`LessonUpdateView`/`LessonDeleteView`;
+      `LessonForm` scoped to `school=self.current_school` for
+      Create/Update) and confirmed by the Phase 6 audit — this
+      checkbox was simply never flipped at the time.
 - [x] Validate that the lesson's teacher belongs to the same school.
 - [x] Validate that the lesson's room belongs to the same school.
 - [x] Validate that the lesson's subject belongs to the same school.
@@ -569,18 +573,39 @@ model already represents the required information.
   (`CrossSchoolLessonError`, raised by
   `ScheduleService._ensure_same_school()`), pulled forward because
   giving these resources a `school` FK is what first made a
-  cross-school Lesson possible. This is not the full lesson/scheduling
-  access-control system: the Lesson form's dropdowns are still unscoped
-  and `planned_substitute` is not checked against this invariant.
+  cross-school Lesson possible. Phase 6 closed the two remaining gaps
+  the Phase 6 audit found: the Lesson form's dropdowns (already scoped
+  since Phase 4B) and `planned_substitute` are now both covered —
+  `_ensure_same_school()` includes `planned_substitute_id`'s school in
+  the same invariant it already applied to teacher/room/subject/
+  student group/period.
 
 ## Scheduling
 
-- [ ] Audit ScheduleService.
-- [ ] Audit ConflictService.
-- [ ] Audit LessonRepository.
-- [ ] Ensure all scheduling operations operate within one school.
-- [ ] Confirm conflict detection cannot mix school data.
-- [ ] Add multi-school service tests.
+- [x] Audit ScheduleService — found `create_lesson`/`update_lesson` had
+      no caller-supplied `school_id` check, unlike
+      `SubstitutionService.generate_planned_substitutions`. Closed by
+      adding an optional `school_id` parameter to both, raising the
+      existing `SchoolAuthorizationError` on mismatch (mirroring the
+      Phase 4C precedent); wired from `LessonWriteMixin.form_valid()`.
+      `school_id` remains optional, not mandatory.
+- [x] Audit ConflictService — no gap found. `list_potential_conflicts()`
+      scopes candidates by `academic_year_id`, itself always derived
+      from an already-same-school-validated Period, so cross-school
+      conflict mixing is structurally impossible. Left unchanged.
+- [x] Audit LessonRepository — no gap found. Repository methods
+      correctly take raw ids with no school awareness by design;
+      authorization belongs in the service/view layers above it, which
+      now enforce it. Left unchanged (only the additive
+      `planned_substitute_id` parameter/field described above).
+- [x] Ensure all scheduling operations operate within one school.
+- [x] Confirm conflict detection cannot mix school data.
+- [x] Add multi-school service tests — service-level tests for the new
+      `school_id` guard and the `planned_substitute` invariant in
+      `tests/application/test_schedule_service.py` and
+      `tests/integration/test_lesson_school_integrity.py`, plus a
+      `LessonUpdateView` cross-school-resource-swap regression test in
+      `tests/integration/test_crud_school_isolation.py`.
 
 ---
 

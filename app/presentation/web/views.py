@@ -503,10 +503,10 @@ class LessonWriteMixin:
                 notes=cleaned["notes"],
             )
             if self.is_update:
-                service.update_lesson(lesson)
+                service.update_lesson(lesson, school_id=self.current_school.id)
                 messages.success(self.request, "Updated successfully.")
             else:
-                service.create_lesson(lesson)
+                service.create_lesson(lesson, school_id=self.current_school.id)
                 messages.success(self.request, "Created successfully.")
         except ScheduleConflictError as exc:
             for conflict in exc.conflicts:
@@ -515,7 +515,7 @@ class LessonWriteMixin:
         except InvalidLessonPlacementError as exc:
             form.add_error("start_period", str(exc))
             return self.form_invalid(form)
-        except CrossSchoolLessonError as exc:
+        except (CrossSchoolLessonError, SchoolAuthorizationError) as exc:
             form.add_error(None, str(exc))
             return self.form_invalid(form)
         return redirect(self.get_success_url())

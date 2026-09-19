@@ -89,3 +89,48 @@ def test_service_update_rejects_lesson_mixing_resources_from_another_school(two_
         service().update_lesson(
             command(two_school_data, id=saved.id, room_id=two_school_data["foreign_room"].pk)
         )
+
+
+@pytest.mark.django_db
+def test_service_rejects_lesson_with_cross_school_planned_substitute(two_school_data):
+    with pytest.raises(CrossSchoolLessonError):
+        service().create_lesson(
+            command(
+                two_school_data,
+                planned_substitute_id=two_school_data["foreign_teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_service_update_rejects_lesson_with_cross_school_planned_substitute(two_school_data):
+    saved = service().create_lesson(command(two_school_data))
+
+    with pytest.raises(CrossSchoolLessonError):
+        service().update_lesson(
+            command(
+                two_school_data,
+                id=saved.id,
+                planned_substitute_id=two_school_data["foreign_teacher"].pk,
+            )
+        )
+
+
+@pytest.mark.django_db
+def test_service_accepts_lesson_with_same_school_planned_substitute(two_school_data):
+    substitute = Teacher.objects.create(
+        school=two_school_data["teacher"].school, name="Substitute"
+    )
+
+    saved = service().create_lesson(
+        command(two_school_data, planned_substitute_id=substitute.pk)
+    )
+
+    assert saved.planned_substitute_id == substitute.pk
+
+
+@pytest.mark.django_db
+def test_service_accepts_lesson_with_no_planned_substitute(two_school_data):
+    saved = service().create_lesson(command(two_school_data, planned_substitute_id=None))
+
+    assert saved.planned_substitute_id is None

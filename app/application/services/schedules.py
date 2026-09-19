@@ -7,6 +7,7 @@ from app.domain.exceptions import (
     CrossSchoolLessonError,
     InvalidLessonPlacementError,
     ScheduleConflictError,
+    SchoolAuthorizationError,
 )
 from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import LessonRequest
@@ -73,25 +74,25 @@ class ScheduleService:
         self.lesson_repository = lesson_repository
         self.conflict_service = conflict_service
 
-    def create_lesson(self, lesson: Lesson) -> Lesson:
-        request = self._request_for(lesson)
+    def create_lesson(self, lesson: Lesson, school_id: int | None = None) -> Lesson:
+        request = self._request_for(lesson, school_id=school_id)
         self._raise_for_conflicts(request)
         return self.lesson_repository.create_lesson(lesson)
 
-    def update_lesson(self, lesson: Lesson) -> Lesson:
+    def update_lesson(self, lesson: Lesson, school_id: int | None = None) -> Lesson:
         if lesson.id is None:
             raise ValueError("Lesson id is required for updates.")
-        request = self._request_for(lesson)
+        request = self._request_for(lesson, school_id=school_id)
         self._raise_for_conflicts(request)
         return self.lesson_repository.update_lesson(lesson)
 
-    def _request_for(self, lesson: Lesson) -> LessonRequest:
+    def _request_for(self, lesson: Lesson, school_id: int | None = None) -> LessonRequest:
         period = self.lesson_repository.get_period(lesson.start_period_id)
         if period is None:
             raise InvalidLessonPlacementError("Choose a configured period.")
         if not period.accepts_lessons:
             raise InvalidLessonPlacementError("Lessons cannot occupy break periods.")
-        self._ensure_same_school(lesson, period)
+        self._ensure_same_school(lesson, period, school_id=school_id)
         return LessonRequest(
             teacher_id=lesson.teacher_id,
             room_id=lesson.room_id,
@@ -103,13 +104,16 @@ class ScheduleService:
             lesson_id=lesson.id,
         )
 
-    def _ensure_same_school(self, lesson: Lesson, period: Period) -> None:
+    def _ensure_same_school(
+        self, lesson: Lesson, period: Period, school_id: int | None = None
+    ) -> None:
         school_ids = self.lesson_repository.get_resource_school_ids(
             teacher_id=lesson.teacher_id,
             room_id=lesson.room_id,
             subject_id=lesson.subject_id,
             student_group_id=lesson.student_group_id,
             period_id=period.id,
+            planned_substitute_id=lesson.planned_substitute_id,
         )
         distinct_schools = {
             school_ids.teacher_school_id,
@@ -118,10 +122,16 @@ class ScheduleService:
             school_ids.student_group_school_id,
             school_ids.period_school_id,
         }
+        if school_ids.planned_substitute_school_id is not None:
+            distinct_schools.add(school_ids.planned_substitute_school_id)
         if len(distinct_schools) > 1:
             raise CrossSchoolLessonError(
-                "Teacher, room, subject, and student group must all belong to "
-                "the same school as the lesson's academic year."
+                "Teacher, room, subject, student group, and planned substitute "
+                "must all belong to the same school as the lesson's academic year."
+            )
+        if school_id is not None and school_ids.period_school_id != school_id:
+            raise SchoolAuthorizationError(
+                "This lesson does not belong to the given school."
             )
 
     def _raise_for_conflicts(self, request: LessonRequest) -> None:

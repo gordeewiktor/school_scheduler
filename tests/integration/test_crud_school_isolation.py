@@ -461,3 +461,30 @@ def test_lesson_create_rejects_another_schools_start_period(make_principal_clien
     assert response.status_code == 200
     assert response.context["form"].errors["start_period"]
     assert not Lesson.objects.exists()
+
+
+@pytest.mark.django_db
+def test_lesson_update_rejects_another_schools_resource(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    client_b = make_principal_client("bob", "School B")
+    lesson_a = _make_lesson(client_a.school)
+    foreign_room = Room.objects.create(school=client_b.school, name="Foreign Room")
+
+    response = client_a.post(
+        reverse("lesson-update", args=[lesson_a.pk]),
+        {
+            "teacher": lesson_a.teacher_id,
+            "planned_substitute": "",
+            "subject": lesson_a.subject_id,
+            "room": foreign_room.pk,
+            "student_group": lesson_a.student_group_id,
+            "day": lesson_a.day,
+            "start_period": lesson_a.start_period_id,
+            "notes": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["form"].errors["room"]
+    lesson_a.refresh_from_db()
+    assert lesson_a.room_id != foreign_room.pk

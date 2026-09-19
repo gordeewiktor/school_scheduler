@@ -30,6 +30,7 @@ class ResourceSchoolIds:
     subject_school_id: int | None
     student_group_school_id: int | None
     period_school_id: int | None
+    planned_substitute_school_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +63,7 @@ class LessonRepository(Protocol):
         subject_id: int,
         student_group_id: int,
         period_id: int,
+        planned_substitute_id: int | None = None,
     ) -> ResourceSchoolIds: ...
 
     def get_period(self, period_id: int) -> Period | None: ...

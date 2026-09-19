@@ -9,6 +9,7 @@ from app.domain.exceptions import (
     CrossSchoolLessonError,
     InvalidLessonPlacementError,
     ScheduleConflictError,
+    SchoolAuthorizationError,
 )
 from app.domain.models import Day, Lesson, Period, PeriodKind, Teacher
 from app.domain.policies import ExistingLesson
@@ -65,7 +66,14 @@ class FakeLessonRepository:
         return 1
 
     def get_resource_school_ids(
-        self, *, teacher_id, room_id, subject_id, student_group_id, period_id
+        self,
+        *,
+        teacher_id,
+        room_id,
+        subject_id,
+        student_group_id,
+        period_id,
+        planned_substitute_id=None,
     ):
         return self.resource_school_ids
 
@@ -180,6 +188,85 @@ def test_service_update_rejects_lesson_with_resources_from_different_schools():
     with pytest.raises(CrossSchoolLessonError):
         build_service(repository).update_lesson(command(id=1))
     assert repository.updated == []
+
+
+def test_service_create_lesson_rejects_mismatched_school_id():
+    repository = FakeLessonRepository()
+    with pytest.raises(SchoolAuthorizationError):
+        build_service(repository).create_lesson(command(), school_id=2)
+    assert repository.created == []
+
+
+def test_service_update_lesson_rejects_mismatched_school_id():
+    repository = FakeLessonRepository()
+    with pytest.raises(SchoolAuthorizationError):
+        build_service(repository).update_lesson(command(id=1), school_id=2)
+    assert repository.updated == []
+
+
+def test_service_create_lesson_accepts_matching_school_id():
+    repository = FakeLessonRepository()
+    saved = build_service(repository).create_lesson(command(), school_id=1)
+    assert saved.id == 1
+
+
+def test_service_update_lesson_accepts_matching_school_id():
+    repository = FakeLessonRepository()
+    saved = build_service(repository).update_lesson(command(id=1), school_id=1)
+    assert saved.id == 1
+
+
+def test_service_rejects_lesson_with_cross_school_planned_substitute():
+    repository = FakeLessonRepository(
+        resource_school_ids=ResourceSchoolIds(
+            teacher_school_id=1,
+            room_school_id=1,
+            subject_school_id=1,
+            student_group_school_id=1,
+            period_school_id=1,
+            planned_substitute_school_id=2,
+        )
+    )
+    with pytest.raises(CrossSchoolLessonError):
+        build_service(repository).create_lesson(command(planned_substitute_id=9))
+    assert repository.created == []
+
+
+def test_service_update_rejects_lesson_with_cross_school_planned_substitute():
+    repository = FakeLessonRepository(
+        resource_school_ids=ResourceSchoolIds(
+            teacher_school_id=1,
+            room_school_id=1,
+            subject_school_id=1,
+            student_group_school_id=1,
+            period_school_id=1,
+            planned_substitute_school_id=2,
+        )
+    )
+    with pytest.raises(CrossSchoolLessonError):
+        build_service(repository).update_lesson(command(id=1, planned_substitute_id=9))
+    assert repository.updated == []
+
+
+def test_service_accepts_lesson_with_same_school_planned_substitute():
+    repository = FakeLessonRepository(
+        resource_school_ids=ResourceSchoolIds(
+            teacher_school_id=1,
+            room_school_id=1,
+            subject_school_id=1,
+            student_group_school_id=1,
+            period_school_id=1,
+            planned_substitute_school_id=1,
+        )
+    )
+    saved = build_service(repository).create_lesson(command(planned_substitute_id=9))
+    assert saved.id == 1
+
+
+def test_service_accepts_lesson_with_no_planned_substitute():
+    repository = FakeLessonRepository()
+    saved = build_service(repository).create_lesson(command(planned_substitute_id=None))
+    assert saved.id == 1
 
 
 def test_service_rejects_conflicting_lesson():
