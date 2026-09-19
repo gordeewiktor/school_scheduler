@@ -13,7 +13,7 @@
         {% endif %}
     </div>
     <div class="schedule-actions">
-        {% if user.is_staff %}
+        {% if can_manage_school %}
             {% if selected_academic_year %}
                 <form method="post" action="{% url 'generate-planned-substitutions' %}" onsubmit="return confirm('Generate planned substitutions?\n\nExisting automatically generated substitutions may be replaced.\n\nDo you want to continue?');">
                     {% csrf_token %}
@@ -104,7 +104,7 @@
                     </div>
                 {% endfor %}
                 {% for card in row.cards %}
-                    {% if user.is_staff %}
+                    {% if can_manage_school %}
                     <a class="whole-school-lesson {{ card.color_class }}" href="{{ card.edit_url }}?next={{ request.get_full_path|urlencode }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" title="{{ card.detail_title }}" aria-label="Edit {{ card.subject }} lesson">
                     {% else %}
                     <div class="whole-school-lesson {{ card.color_class }}" style="grid-column: {{ card.column }}; grid-row: {{ card.lane }}" title="{{ card.detail_title }}">
@@ -113,7 +113,7 @@
                         {% if card.planned_substitute %}
                             <span class="planned-substitute">Sub: {{ card.planned_substitute }}</span>
                         {% endif %}
-                    {% if user.is_staff %}
+                    {% if can_manage_school %}
                     </a>
                     {% else %}
                     </div>
@@ -144,7 +144,7 @@
                 {% for cell in row.cells %}
                     <td class="timetable-cell {% if cell.kind == 'break' %}is-break{% elif cell.kind == 'empty' %}is-empty{% endif %}">
                         {% if cell.kind == "lesson" %}
-                            {% if user.is_staff %}
+                            {% if can_manage_school %}
                                 <a class="lesson-card {{ cell.card.color_class }}" href="{{ cell.card.edit_url }}?next={{ request.get_full_path|urlencode }}" title="{{ cell.card.detail_title }}" aria-label="Edit {{ cell.card.subject }} lesson">
                             {% else %}
                                 <div class="lesson-card {{ cell.card.color_class }}" title="{{ cell.card.detail_title }}">
@@ -158,7 +158,7 @@
                                 {% if cell.card.planned_substitute %}
                                     <span class="planned-substitute">Sub: {{ cell.card.planned_substitute }}</span>
                                 {% endif %}
-                            {% if user.is_staff %}
+                            {% if can_manage_school %}
                                 </a>
                             {% else %}
                                 </div>

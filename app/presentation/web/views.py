@@ -500,7 +500,7 @@ class ChooseSchoolView(LoginRequiredMixin, View):
     template_name = "scheduler/choose_school.html"
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        memberships = CurrentSchoolService.memberships_for(request.user)
+        memberships = CurrentSchoolService.memberships_for(request.user, request=request)
         if not memberships:
             return render(request, "scheduler/no_school_access.html", status=403)
         if len(memberships) == 1:
@@ -511,7 +511,7 @@ class ChooseSchoolView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         school = CurrentSchoolService.set_current(request, request.POST.get("school_id"))
         if school is None:
-            memberships = CurrentSchoolService.memberships_for(request.user)
+            memberships = CurrentSchoolService.memberships_for(request.user, request=request)
             messages.error(request, "Choose one of the schools you belong to.")
             return render(
                 request, self.template_name, {"memberships": memberships}, status=400
@@ -551,6 +551,17 @@ class SchedulePageState:
 
 class ScheduleView(TemplateView):
     template_name = "scheduler/schedule.html"
+
+    # Resolved once in dispatch() and reused everywhere else in this
+    # view, so the whole_school gate, the view-choice list, and the
+    # actual data scoping can never disagree with each other. None for
+    # anonymous visitors and for authenticated users with no resolvable
+    # current school — both cases keep the public, unscoped behaviour
+    # for the focused (teacher/room/student_group) views; only
+    # whole_school requires it to be non-None. `is_staff` plays no role
+    # here at all: it's a Django Admin privilege, not an application
+    # school-management context.
+    current_school: Any = None
 
     VIEW_CHOICES = (
         ScheduleViewChoice("teacher", "Teacher", "View one teacher's week"),
@@ -592,15 +603,13 @@ class ScheduleView(TemplateView):
     }
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if (
-            request.GET.get("view") == "whole_school"
-            and not request.user.is_staff
-        ):
+        self.current_school = CurrentSchoolService.resolve(request)
+        if request.GET.get("view") == "whole_school" and self.current_school is None:
             raise PermissionDenied
         return super().dispatch(request, *args, **kwargs)
 
     def _view_choices(self) -> tuple[ScheduleViewChoice, ...]:
-        if self.request.user.is_staff:
+        if self.current_school is not None:
             return self.VIEW_CHOICES
         return tuple(
             choice for choice in self.VIEW_CHOICES if choice.value != "whole_school"
@@ -651,15 +660,14 @@ class ScheduleView(TemplateView):
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         service = build_schedule_service()
-        current_school = CurrentSchoolService.resolve(self.request)
 
-        academic_years = self._academic_years(current_school)
+        academic_years = self._academic_years(self.current_school)
         academic_year = self._academic_year(academic_years)
         requested_view = self.request.GET.get("view", "")
         view_choices = self._view_choices()
         valid_views = {choice.value for choice in view_choices}
         current_view = requested_view if requested_view in valid_views else ""
-        selector = self._selector(current_view, current_school)
+        selector = self._selector(current_view, self.current_school)
 
         waiting_for_view = not current_view
         waiting_for_selection = selector is not None and not selector.selected

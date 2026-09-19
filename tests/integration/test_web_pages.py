@@ -635,15 +635,133 @@ def test_teacher_view_only_exposes_teacher_selector(authenticated_client):
 
 @pytest.mark.django_db
 def test_administrator_navigation(authenticated_client):
+    # authenticated_client is is_staff=True AND holds a real
+    # SchoolMembership (Phase 4A's fixture) — the "is_staff principal"
+    # case: full school-management navigation, plus Admin because
+    # is_staff is genuinely true, not because it substitutes for
+    # membership. "Lessons" has no Django Admin equivalent at all, so
+    # it must be reachable from here; "Teacher Substitution" is a
+    # legitimate principal-facing feature and must be too.
     response = authenticated_client.get(reverse("schedule"))
 
     assert response.status_code == 200
     assert b">Timetable<" in response.content
+    assert b">Staff Schedule<" in response.content
     assert b">Lessons<" in response.content
+    assert b">Teacher Substitution<" in response.content
     assert b">Admin<" in response.content
-    assert b">Teacher Substitution<" not in response.content
     assert b">Teachers<" not in response.content
     assert b">Rooms<" not in response.content
+
+
+@pytest.mark.django_db
+def test_non_staff_principal_navigation(client, make_user, make_school, make_membership):
+    # A real, non-staff principal must see the full school-management
+    # navigation (this is exactly what was missing before Phase 4D:
+    # these features were previously hidden behind is_staff even though
+    # the underlying views only ever required membership).
+    user = make_user("principal", is_staff=False)
+    school = make_school("School A")
+    make_membership(user, school)
+    client.force_login(user)
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b">Timetable<" in response.content
+    assert b">Staff Schedule<" in response.content
+    assert b">Lessons<" in response.content
+    assert b">Teacher Substitution<" in response.content
+    assert b">Admin<" not in response.content
+
+
+@pytest.mark.django_db
+def test_is_staff_without_membership_navigation(client, make_user):
+    # is_staff alone must not grant school-management navigation — it
+    # is a Django Admin privilege, not an application authorization
+    # context. Admin itself still appears, because that really is
+    # controlled by is_staff.
+    user = make_user("dev", is_staff=True)
+    client.force_login(user)
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b">Timetable<" in response.content
+    assert b">Staff Schedule<" not in response.content
+    assert b">Lessons<" not in response.content
+    assert b">Teacher Substitution<" not in response.content
+    assert b">Admin<" in response.content
+
+
+@pytest.mark.django_db
+def test_anonymous_navigation(client):
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b">Timetable<" in response.content
+    assert b">Staff Schedule<" not in response.content
+    assert b">Lessons<" not in response.content
+    assert b">Teacher Substitution<" not in response.content
+    assert b">Admin<" not in response.content
+
+
+@pytest.mark.django_db
+def test_multi_school_user_sees_switch_school_link_and_current_school(
+    client, make_user, make_school, make_membership
+):
+    user = make_user("alice")
+    school_a = make_school("School A")
+    school_b = make_school("School B")
+    make_membership(user, school_a)
+    make_membership(user, school_b)
+    client.force_login(user)
+
+    # Auto-selection doesn't apply with two memberships, so pick one first.
+    client.post(reverse("choose-school"), {"school_id": school_a.id})
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b"School A" in response.content
+    assert b"Switch School" in response.content
+
+
+@pytest.mark.django_db
+def test_single_school_user_does_not_see_switch_school_link(
+    client, make_user, make_school, make_membership
+):
+    user = make_user("alice")
+    school = make_school("Only School")
+    make_membership(user, school)
+    client.force_login(user)
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b"Only School" in response.content
+    assert b"Switch School" not in response.content
+
+
+@pytest.mark.django_db
+def test_no_membership_user_sees_no_school_indicator_or_switch_link(client, make_user):
+    user = make_user("dev", is_staff=True)
+    client.force_login(user)
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b"Switch School" not in response.content
+    assert b'class="navbar-current-school"' not in response.content
+
+
+@pytest.mark.django_db
+def test_anonymous_user_sees_no_school_indicator_or_switch_link(client):
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b"Switch School" not in response.content
+    assert b'class="navbar-current-school"' not in response.content
 
 
 @pytest.mark.django_db

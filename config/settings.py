@@ -38,6 +38,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "app.presentation.web.school_access.school_context",
                 "app.presentation.web.navigation.navigation",
             ],
         },

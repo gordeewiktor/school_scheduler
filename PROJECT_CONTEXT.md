@@ -957,6 +957,10 @@ technical safeguard against it, only this documented rule.
 A more sophisticated school-specific admin system can be designed later
 if needed.
 
+Re-confirmed, not changed, by Phase 4D's audit: this remains a
+deliberate, documented operational constraint rather than a code fix
+Phase 4D was asked to make.
+
 ---
 
 # 25. Public Timetable
@@ -1249,16 +1253,65 @@ directly-reachable method that bulk-mutates `Lesson.planned_substitute`);
 no other repository or service method was touched, and no migration
 was needed.
 
-Phase 4C deliberately stops before the remaining `is_staff` checks in
-`schedule.html`/`navigation.py` (they still gate which view *choices*
-are shown, e.g. `whole_school`, orthogonal to the data-scoping fixed
-here) and before any Django Admin or navigation redesign — that is
-Phase 4D.
+**Phase 4D (cleanup and full authorization audit) is implemented.** A
+dedicated audit (before implementation) found one genuine, previously
+undetected cross-school leak: `ScheduleView`'s `whole_school` gate
+checked `request.user.is_staff` alone, so an authenticated `is_staff`
+user with **zero** `SchoolMembership` rows could view any school's
+complete timetable — confirmed by reproducing it before the fix.
+Everything else found was UI/navigation incompleteness (a real,
+legitimate principal was fully authorized server-side but the
+templates only ever showed these features to `is_staff` users) rather
+than a live vulnerability.
 
-The next implementation step is:
+- **`ScheduleView` (`app/presentation/web/views.py`)**: `current_school`
+  is now resolved exactly once, in `dispatch()`, and reused by
+  `_view_choices()` and `get_context_data()` instead of each deciding
+  independently (previously `dispatch()`/`_view_choices()` checked
+  `is_staff` while `get_context_data()` separately resolved
+  `current_school` — two authorization signals that could disagree).
+  The `whole_school` gate now requires a resolvable `current_school`,
+  not `is_staff`. `is_staff` plays no role anywhere in this view
+  anymore. Anonymous/public focused-timetable viewing is unchanged —
+  confirmed by the existing `test_public_user_*` tests passing
+  unchanged throughout.
+- **`school_context` context processor** (new, in
+  `app/presentation/web/school_access.py`, registered in
+  `config/settings.py`): the single source of truth for
+  `current_school`, `can_manage_school` (`== current_school is not
+  None`), and `can_switch_school` (more than one `PRINCIPAL`
+  membership), available in every template. This is what let
+  `schedule.html` and `navigation.py` stop checking `is_staff` for
+  application features without duplicating `CurrentSchoolService`
+  logic in either place.
+- **`schedule.html`**: all 5 `is_staff` checks gating "Add Lesson",
+  "Generate Planned Substitutions", and the clickable lesson-edit links
+  (whole-school and focused views) replaced with `can_manage_school`.
+- **`navigation.py`**: `NavigationBuilder.for_request(request)` (was
+  `for_user(user)`) now shows `SCHOOL_MANAGEMENT_ITEMS` (Timetable,
+  Staff Schedule, Lessons, Teacher Substitution) when
+  `CurrentSchoolService.resolve(request)` is not `None`, and appends
+  the `Admin` item independently, only when `is_staff` — the one
+  remaining, intentional use of `is_staff` in the entire application
+  (confirmed by a final sweep: no other `is_staff`/`is_superuser` check
+  exists anywhere in `app/`). "Lessons" was previously missing from the
+  administrator nav entirely — it has no Django Admin registration, so
+  there was no way to reach it from the UI at all; this is also what
+  the long-carried `test_administrator_navigation` failure had been
+  pointing at the whole time, not an unrelated flake.
+- **`base.html`**: shows the active school's name (`current_school`)
+  and a "Switch School" link (`can_switch_school`, linking to the
+  existing `choose-school` URL — no new selection mechanism) when
+  applicable; shows neither for anonymous or no-membership users.
+- No repository, service, domain, `SchoolMembership`, Django Admin, or
+  registration/onboarding changes. No migration was needed.
 
-    Phase 4D: remaining `is_staff` cleanup in templates/navigation,
-    full regression/IDOR audit sweep, documentation.
+`test_administrator_navigation` — the "known pre-existing failure"
+carried since Phase 3 — is now fixed, not just left alone: it was a
+real (if minor) navigation defect, and the fix landed as part of this
+phase's own scope rather than being treated as unrelated. Full suite:
+266 passed, 0 failed.
 
-Everything should be implemented incrementally and tested after each
-meaningful change.
+Deferred, per explicit decision: Django Admin row-level school scoping,
+registration/self-service onboarding, additional `SchoolMembership`
+roles, and URL-based tenancy. None of these were touched.

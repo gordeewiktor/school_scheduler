@@ -9,6 +9,7 @@ from app.infrastructure.database.models import (
     Lesson,
     Period,
     Room,
+    School,
     StudentGroup,
     Subject,
     Teacher,
@@ -287,7 +288,22 @@ def test_schedule_still_works_for_current_school(make_principal_client):
 
 
 @pytest.mark.django_db
-def test_schedule_whole_school_view_scoped_to_current_school_for_authenticated_staff(
+def test_non_staff_principal_can_use_whole_school_view(make_principal_client):
+    # Phase 4D: whole_school authorization is current-school-based, not
+    # is_staff-based — a real, non-staff principal must be able to use it.
+    client_a = make_principal_client("alice", "School A")
+    year_a, period_a, lesson_a = _make_lesson(client_a.school, subject_name="Math A")
+
+    response = client_a.get(
+        reverse("schedule"), {"view": "whole_school", "academic_year": year_a.pk}
+    )
+
+    assert response.status_code == 200
+    assert b"Math A" in response.content
+
+
+@pytest.mark.django_db
+def test_whole_school_view_scoped_to_current_school_for_non_staff_principal(
     make_principal_client,
 ):
     client_a = make_principal_client("alice", "School A")
@@ -295,14 +311,73 @@ def test_schedule_whole_school_view_scoped_to_current_school_for_authenticated_s
     year_a, period_a, lesson_a = _make_lesson(client_a.school, subject_name="Math A")
     year_b, period_b, lesson_b = _make_lesson(client_b.school, subject_name="Math B")
 
-    # Promote alice to staff so she is allowed to use the whole_school view
-    # at all — is_staff only gates *which view choices* are offered
-    # (Phase 4D concern); the data scoping fixed here is independent of it.
-    get_user_model().objects.filter(username="alice").update(is_staff=True)
-
     response = client_a.get(
         reverse("schedule"), {"view": "whole_school", "academic_year": year_b.pk}
     )
 
     assert response.status_code == 200
     assert b"Math B" not in response.content
+
+
+@pytest.mark.django_db
+def test_is_staff_without_membership_cannot_use_whole_school_view(client):
+    # The vulnerability found during the Phase 4D audit: an is_staff
+    # account with zero SchoolMembership rows must not be able to use
+    # whole_school just because is_staff=True — is_staff is a Django
+    # Admin privilege, not an application school-management context.
+    staff_user = get_user_model().objects.create_user(
+        username="dev", password="x", is_staff=True
+    )
+    client.force_login(staff_user)
+
+    other_school = School.objects.create(name="Victim School")
+    year, period, lesson = _make_lesson(other_school, subject_name="Secret Subject")
+
+    response = client.get(
+        reverse("schedule"), {"view": "whole_school", "academic_year": year.pk}
+    )
+
+    assert response.status_code == 403
+    assert b"Secret Subject" not in response.content
+
+
+# --- 4D-3: schedule.html application actions -------------------------------
+
+
+@pytest.mark.django_db
+def test_non_staff_principal_sees_and_can_use_application_actions(make_principal_client):
+    client_a = make_principal_client("alice", "School A")
+    year_a, period_a, lesson_a = _make_lesson(client_a.school)
+    Teacher.objects.create(school=client_a.school, name="Substitute Teacher")
+
+    response = client_a.get(
+        reverse("schedule"), {"view": "whole_school", "academic_year": year_a.pk}
+    )
+
+    assert response.status_code == 200
+    assert b"Add Lesson" in response.content
+    assert b"Generate Planned Substitutions" in response.content
+    # The lesson card is a clickable edit link, not a plain div.
+    assert reverse("lesson-update", args=[lesson_a.pk]).encode() in response.content
+
+    # And the actions actually work end-to-end, not just visually.
+    generate_response = client_a.post(
+        reverse("generate-planned-substitutions"), {"academic_year": year_a.pk}
+    )
+    assert generate_response.status_code == 302
+    lesson_a.refresh_from_db()
+    assert lesson_a.planned_substitute_id is not None
+
+
+@pytest.mark.django_db
+def test_is_staff_without_membership_does_not_see_application_actions(client):
+    staff_user = get_user_model().objects.create_user(
+        username="dev", password="x", is_staff=True
+    )
+    client.force_login(staff_user)
+
+    response = client.get(reverse("schedule"))
+
+    assert response.status_code == 200
+    assert b"Add Lesson" not in response.content
+    assert b"Generate Planned Substitutions" not in response.content
