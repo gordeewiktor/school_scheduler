@@ -4,6 +4,7 @@ from app.presentation.web import views
 
 urlpatterns = [
     path("", views.ScheduleView.as_view(), name="schedule"),
+    path("accounts/register/", views.RegistrationView.as_view(), name="register"),
     path("choose-school/", views.ChooseSchoolView.as_view(), name="choose-school"),
     path("staff-schedule/", views.StaffScheduleView.as_view(), name="staff-schedule"),
     path(

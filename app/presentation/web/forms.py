@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth.forms import UserCreationForm
 
 from app.application.services.period_generation import BreakAfter
 from app.domain.models import Day
@@ -215,3 +216,29 @@ class TeacherSubstitutionForm(forms.Form):
         if period.academic_year_id != academic_year.pk:
             raise forms.ValidationError("Choose a period from the selected academic year.")
         return period
+
+
+class RegistrationForm(UserCreationForm):
+    """Username/password (via UserCreationForm) plus a school_name for
+    the new school the registering user will become PRINCIPAL of.
+
+    Deliberately a plain CharField, never a ModelChoiceField — an
+    existing School must never be selectable here. This form only
+    validates input; `register_principal()` owns actually creating the
+    User/School/SchoolMembership atomically, so `save()` is disabled to
+    avoid a caller accidentally bypassing that.
+    """
+
+    school_name = forms.CharField(max_length=120, label="School name")
+
+    def clean_school_name(self) -> str:
+        name = self.cleaned_data["school_name"].strip()
+        if not name:
+            raise forms.ValidationError("Enter a school name.")
+        return name
+
+    def save(self, commit: bool = True):
+        raise NotImplementedError(
+            "Use register_principal() with this form's cleaned_data instead of "
+            "save() — User/School/SchoolMembership must be created together."
+        )

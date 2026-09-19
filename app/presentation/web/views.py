@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
+from app.application.services.registration import register_principal
 from app.presentation.web.dependencies import (
     build_period_generation_service,
     build_schedule_service,
@@ -7,15 +8,25 @@ from app.presentation.web.dependencies import (
 )
 
 from django.core.exceptions import PermissionDenied
+from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib import messages
 from django.contrib.messages.views import SuccessMessageMixin
+from django.db import IntegrityError
 from django.db.models import ProtectedError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.generic import CreateView, DeleteView, ListView, TemplateView, UpdateView, View
+from django.views.generic import (
+    CreateView,
+    DeleteView,
+    FormView,
+    ListView,
+    TemplateView,
+    UpdateView,
+    View,
+)
 
 from app.domain.exceptions import (
     CrossSchoolLessonError,
@@ -37,6 +48,7 @@ from app.infrastructure.database.models import (
 )
 from app.presentation.web.forms import (
     LessonForm,
+    RegistrationForm,
     RoomForm,
     StudentGroupForm,
     SubjectForm,
@@ -542,6 +554,40 @@ class LessonDeleteView(SchedulerDeleteView):
     school_filter_lookup = "start_period__academic_year__school"
     title = "Delete Lesson"
     list_url_name = "lesson-list"
+
+
+class RegistrationView(FormView):
+    """Lets a new principal create their account and School in one
+    step. Deliberately not behind SchoolAccessRequiredMixin — this is
+    how someone gets their *first* SchoolMembership in the first
+    place.
+    """
+
+    template_name = "registration/register.html"
+    form_class = RegistrationForm
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if request.user.is_authenticated:
+            return redirect("schedule")
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        try:
+            user, _school, _membership = register_principal(
+                username=form.cleaned_data["username"],
+                password=form.cleaned_data["password1"],
+                school_name=form.cleaned_data["school_name"],
+            )
+        except IntegrityError:
+            # The realistic race: form validation saw the username as
+            # free, but it was taken by the time register_principal()
+            # tried to create it. register_principal()'s own
+            # transaction.atomic() has already rolled back the School
+            # that would otherwise have been orphaned.
+            form.add_error("username", "This username is already taken.")
+            return self.form_invalid(form)
+        login(self.request, user)
+        return redirect("schedule")
 
 
 class ChooseSchoolView(LoginRequiredMixin, View):
