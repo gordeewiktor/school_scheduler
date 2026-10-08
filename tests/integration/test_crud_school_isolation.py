@@ -265,21 +265,6 @@ def _make_lesson(school, teacher_name="Ada", room_name="A101", subject_name="Mat
 
 
 @pytest.mark.django_db
-def test_lesson_list_only_shows_current_school_lessons(make_principal_client):
-    client_a = make_principal_client("alice", "School A")
-    client_b = make_principal_client("bob", "School B")
-    lesson_a = _make_lesson(client_a.school, subject_name="Math A")
-    lesson_b = _make_lesson(client_b.school, subject_name="Math B")
-
-    response = client_a.get(reverse("lesson-list"))
-
-    assert response.status_code == 200
-    assert b"Math A" in response.content
-    assert b"Math B" not in response.content
-    assert lesson_a.pk != lesson_b.pk
-
-
-@pytest.mark.django_db
 def test_lesson_update_of_another_schools_lesson_is_404(make_principal_client):
     client_a = make_principal_client("alice", "School A")
     client_b = make_principal_client("bob", "School B")

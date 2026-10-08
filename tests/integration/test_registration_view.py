@@ -56,8 +56,8 @@ def test_new_principal_can_access_their_school_scoped_application(client):
     assert response.status_code == 200
     assert response.context["current_school"] == school
 
-    lesson_list_response = client.get(reverse("lesson-list"))
-    assert lesson_list_response.status_code == 200
+    staff_schedule_response = client.get(reverse("staff-schedule"))
+    assert staff_schedule_response.status_code == 200
 
 
 @pytest.mark.django_db

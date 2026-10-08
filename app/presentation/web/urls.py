@@ -12,12 +12,6 @@ urlpatterns = [
         views.GeneratePlannedSubstitutionsView.as_view(),
         name="generate-planned-substitutions",
     ),
-    path(
-        "teacher-substitution/",
-        views.TeacherSubstitutionView.as_view(),
-        name="teacher-substitution",
-    ),
-    path("lessons/", views.LessonListView.as_view(), name="lesson-list"),
     path("lessons/new/", views.LessonCreateView.as_view(), name="lesson-create"),
     path("lessons/<int:pk>/edit/", views.LessonUpdateView.as_view(), name="lesson-update"),
     path("lessons/<int:pk>/delete/", views.LessonDeleteView.as_view(), name="lesson-delete"),

@@ -16,8 +16,6 @@ class NavigationBuilder:
     SCHOOL_MANAGEMENT_ITEMS = (
         NavigationItem("Timetable", "schedule"),
         NavigationItem("Staff Schedule", "staff-schedule"),
-        NavigationItem("Lessons", "lesson-list"),
-        NavigationItem("Teacher Substitution", "teacher-substitution"),
     )
     PUBLIC_ITEMS = (
         NavigationItem("Timetable", "schedule"),

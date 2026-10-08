@@ -28,6 +28,12 @@
 </div>
 
 {% if page.waiting_for_view %}
+    {% if not user.is_authenticated %}
+        <div class="alert demo-cta">
+            Curious how this looks for a real school?
+            <a href="{% url 'login' %}">Log in to explore the demo schedule</a>.
+        </div>
+    {% endif %}
     <section class="schedule-start">
         <h2 class="h3">Choose what you want to view</h2>
         <p class="text-muted">Start with the timetable you want to work on.</p>

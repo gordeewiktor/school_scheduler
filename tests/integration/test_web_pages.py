@@ -639,16 +639,12 @@ def test_administrator_navigation(authenticated_client):
     # SchoolMembership (Phase 4A's fixture) — the "is_staff principal"
     # case: full school-management navigation, plus Admin because
     # is_staff is genuinely true, not because it substitutes for
-    # membership. "Lessons" has no Django Admin equivalent at all, so
-    # it must be reachable from here; "Teacher Substitution" is a
-    # legitimate principal-facing feature and must be too.
+    # membership.
     response = authenticated_client.get(reverse("schedule"))
 
     assert response.status_code == 200
     assert b">Timetable<" in response.content
     assert b">Staff Schedule<" in response.content
-    assert b">Lessons<" in response.content
-    assert b">Teacher Substitution<" in response.content
     assert b">Admin<" in response.content
     assert b">Teachers<" not in response.content
     assert b">Rooms<" not in response.content
@@ -670,8 +666,6 @@ def test_non_staff_principal_navigation(client, make_user, make_school, make_mem
     assert response.status_code == 200
     assert b">Timetable<" in response.content
     assert b">Staff Schedule<" in response.content
-    assert b">Lessons<" in response.content
-    assert b">Teacher Substitution<" in response.content
     assert b">Admin<" not in response.content
 
 
@@ -689,8 +683,6 @@ def test_is_staff_without_membership_navigation(client, make_user):
     assert response.status_code == 200
     assert b">Timetable<" in response.content
     assert b">Staff Schedule<" not in response.content
-    assert b">Lessons<" not in response.content
-    assert b">Teacher Substitution<" not in response.content
     assert b">Admin<" in response.content
 
 
@@ -701,8 +693,6 @@ def test_anonymous_navigation(client):
     assert response.status_code == 200
     assert b">Timetable<" in response.content
     assert b">Staff Schedule<" not in response.content
-    assert b">Lessons<" not in response.content
-    assert b">Teacher Substitution<" not in response.content
     assert b">Admin<" not in response.content
 
 
@@ -770,15 +760,8 @@ def test_regular_user_navigation(regular_client):
 
     assert response.status_code == 200
     assert b">Timetable<" in response.content
-    assert b">Teacher Substitution<" not in response.content
-    assert b">Lessons<" not in response.content
     assert b">Admin<" not in response.content
     assert b"Whole School" not in response.content
-
-
-@pytest.mark.django_db
-def test_teacher_substitution_lookup_requires_principal(regular_client):
-    assert regular_client.get(reverse("teacher-substitution")).status_code == 403
 
 
 @pytest.mark.django_db
@@ -790,14 +773,12 @@ def test_administrator_can_access_django_admin(authenticated_client):
 @pytest.mark.django_db
 def test_regular_user_cannot_access_administration_pages(regular_client):
     assert regular_client.get(reverse("admin:index")).status_code == 302
-    assert regular_client.get(reverse("lesson-list")).status_code == 403
     assert regular_client.get(reverse("teacher-list")).status_code == 403
     assert regular_client.get(reverse("schedule"), {"view": "whole_school"}).status_code == 403
 
 
 @pytest.mark.django_db
 def test_public_user_cannot_access_administration_pages(client):
-    assert client.get(reverse("lesson-list")).status_code == 302
     assert client.get(reverse("teacher-list")).status_code == 302
     assert client.get(reverse("generate-planned-substitutions")).status_code == 302
     assert client.post(reverse("generate-planned-substitutions")).status_code == 302
@@ -854,35 +835,3 @@ def test_public_user_cannot_access_whole_school_schedule(client):
     response = client.get(reverse("schedule"), {"view": "whole_school"})
 
     assert response.status_code == 403
-
-
-@pytest.mark.django_db
-def test_teacher_substitution_form_submission_lists_available_teachers(
-    authenticated_client, lesson_form_data
-):
-    busy_teacher = lesson_form_data["teacher"]
-    free_teacher = Teacher.objects.create(school=lesson_form_data["school"], name="Grace")
-    Lesson.objects.create(
-        teacher=busy_teacher,
-        subject=lesson_form_data["subject"],
-        room=lesson_form_data["room"],
-        student_group=lesson_form_data["student_group"],
-        day="MONDAY",
-        start_period=lesson_form_data["start_period"],
-    )
-
-    response = authenticated_client.get(
-        reverse("teacher-substitution"),
-        {
-            "academic_year": lesson_form_data["start_period"].academic_year_id,
-            "day": "MONDAY",
-            "period": lesson_form_data["start_period"].pk,
-        },
-    )
-
-    assert response.status_code == 200
-    assert [teacher.name for teacher in response.context["available_teachers"]] == [
-        free_teacher.name
-    ]
-    assert free_teacher.name.encode() in response.content
-    assert busy_teacher.name.encode() not in response.content

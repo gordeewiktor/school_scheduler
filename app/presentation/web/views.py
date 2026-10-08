@@ -56,7 +56,6 @@ from app.presentation.web.forms import (
     AcademicYearForm,
     GeneratePeriodsForm,
     PeriodForm,
-    TeacherSubstitutionForm,
 )
 from app.presentation.web.schedule_renderers import (
     FocusedTimetableRenderer,
@@ -472,26 +471,6 @@ class PeriodGenerationView(SchoolAccessRequiredMixin, View):
         )
 
 
-class LessonListView(SchedulerListView):
-    model = Lesson
-    queryset = Lesson.objects.select_related(
-        "teacher", "subject", "room", "student_group", "start_period"
-    )
-    school_filter_lookup = "start_period__academic_year__school"
-    title = "Lessons"
-    create_url_name = "lesson-create"
-    edit_url_name = "lesson-update"
-    delete_url_name = "lesson-delete"
-    columns = [
-        ("subject", "Subject"),
-        ("teacher", "Teacher"),
-        ("room", "Room"),
-        ("student_group", "Student Group"),
-        ("day", "Day"),
-        ("start_period", "Start Period"),
-    ]
-
-
 class LessonWriteMixin:
     is_update = False
 
@@ -537,7 +516,7 @@ class LessonCreateView(LessonWriteMixin, SchedulerCreateView):
     model = Lesson
     form_class = LessonForm
     title = "New Lesson"
-    list_url_name = "lesson-list"
+    list_url_name = "schedule"
 
 
 class LessonUpdateView(LessonWriteMixin, SchedulerUpdateView):
@@ -545,7 +524,7 @@ class LessonUpdateView(LessonWriteMixin, SchedulerUpdateView):
     form_class = LessonForm
     school_filter_lookup = "start_period__academic_year__school"
     title = "Edit Lesson"
-    list_url_name = "lesson-list"
+    list_url_name = "schedule"
     is_update = True
 
 
@@ -553,7 +532,7 @@ class LessonDeleteView(SchedulerDeleteView):
     model = Lesson
     school_filter_lookup = "start_period__academic_year__school"
     title = "Delete Lesson"
-    list_url_name = "lesson-list"
+    list_url_name = "schedule"
 
 
 class RegistrationView(FormView):
@@ -896,26 +875,3 @@ class StaffScheduleView(SchoolAccessRequiredMixin, TemplateView):
         return context
 
 
-class TeacherSubstitutionView(SchoolAccessRequiredMixin, TemplateView):
-    template_name = "scheduler/teacher_substitution.html"
-
-    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
-        context = super().get_context_data(**kwargs)
-        form = TeacherSubstitutionForm(self.request.GET or None, school=self.current_school)
-        available_teachers = None
-
-        if form.is_bound and form.is_valid():
-            substitution_service = build_substitution_service()
-            available_teachers = substitution_service.available_teachers(
-                academic_year_id=form.cleaned_data["academic_year"].pk,
-                day=Day(form.cleaned_data["day"]),
-                period_id=form.cleaned_data["period"].pk,
-            )
-
-        context.update(
-            {
-                "form": form,
-                "available_teachers": available_teachers,
-            }
-        )
-        return context
