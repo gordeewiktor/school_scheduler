@@ -525,28 +525,52 @@ timetable structure.
 
 ## Periods
 
-- [ ] Confirm current Period model is appropriate.
-- [ ] Keep Period associated with AcademicYear.
-- [ ] Ensure period order is unique within AcademicYear.
-- [ ] Ensure period names are unique within AcademicYear.
-- [ ] Preserve start/end-time validation.
-- [ ] Support LESSON periods.
-- [ ] Support BREAK periods.
+- [x] Confirm current Period model is appropriate — unchanged since
+      Phase 1/3; no redesign was needed.
+- [x] Keep Period associated with AcademicYear (`academic_year`
+      ForeignKey, `on_delete=CASCADE`).
+- [x] Ensure period order is unique within AcademicYear
+      (`UniqueConstraint(academic_year, order)`).
+- [x] Ensure period names are unique within AcademicYear
+      (`UniqueConstraint(academic_year, name)`).
+- [x] Preserve start/end-time validation (`Period.clean()` delegates to
+      the domain `Period`, raising `InvalidPeriodError` on an invalid
+      range).
+- [x] Support LESSON periods (`Period.Kind.LESSON`).
+- [x] Support BREAK periods (`Period.Kind.BREAK`).
+
+  These were already true going into Phase 5 (Phase 1/3 groundwork);
+  this checklist was simply never flipped at the time.
 
 ## Timetable configuration
 
-Eventually support configuration such as:
+- [x] Number of periods per day.
+- [x] Period names (auto-generated as "Period N"/"Break after Period N"
+      by the generator below; still individually renameable afterward
+      via the existing legacy Period CRUD).
+- [x] Period order.
+- [x] Start times.
+- [x] End times.
+- [x] Breaks.
+- [x] Default lesson duration.
 
-- [ ] Number of periods per day.
-- [ ] Period names.
-- [ ] Period order.
-- [ ] Start times.
-- [ ] End times.
-- [ ] Breaks.
-- [ ] Default lesson duration.
-
-Avoid creating redundant configuration fields when the existing Period
-model already represents the required information.
+  Implemented via a one-shot **period generation workflow**
+  (`b7a3335`), not a per-field configuration system — avoids the
+  redundant-configuration trap this section originally warned about.
+  `PeriodGenerationService` (`app/application/services/period_generation.py`)
+  takes a lesson count, first start time, lesson duration, and an
+  optional list of `BreakAfter(after_period, duration_minutes)`
+  entries, and derives every period's name/order/start/end time by
+  walking forward from the first start time — validated to stay within
+  a single day. It only ever runs once per AcademicYear
+  (`PeriodsAlreadyExistError` if periods already exist — this is a
+  bulk-create tool, not an editor) and is school-authorization-checked
+  (`SchoolAuthorizationError` if the academic year isn't the caller's
+  school's). Reachable via `PeriodGenerationView`
+  (`/legacy/periods/generate/`) and `GeneratePeriodsForm`. Individual
+  periods remain editable/deletable afterward through the pre-existing
+  legacy Period CRUD views — this workflow only replaces *initial*
+  setup, not ongoing editing.
 
 ---
 
@@ -651,87 +675,225 @@ could actually use.
 
 ## Login
 
-- [ ] Confirm existing login flow.
-- [ ] Connect authenticated User to Principal/School.
-- [ ] Define behavior for users without a school.
+- [x] Confirm existing login flow — Django's built-in
+      `auth_views.LoginView`/`LogoutView` (`config/urls.py`), unchanged;
+      no custom login view was needed.
+- [x] Connect authenticated User to Principal/School — already done in
+      Phase 4A via `SchoolMembership`/`CurrentSchoolService`.
+- [x] Define behavior for users without a school — already done in
+      Phase 4A (`SchoolAccessRequiredMixin`'s "no school access" page);
+      Phase 8 added the complementary way *out* of that state
+      (self-service registration, below).
 
 ## Registration
 
-- [ ] Create registration flow.
-- [ ] Allow a new user to create a School.
-- [ ] Create the Principal/membership relationship.
-- [ ] Perform account + school creation in one transaction.
-- [ ] Prevent accidental creation of orphaned school/user records.
+- [x] Create registration flow — `RegistrationView`
+      (`/accounts/register/`, `app/presentation/web/views.py`),
+      deliberately not behind `SchoolAccessRequiredMixin` since this is
+      how a user gets their *first* `SchoolMembership`.
+- [x] Allow a new user to create a School.
+- [x] Create the Principal/membership relationship.
+- [x] Perform account + school creation in one transaction —
+      `register_principal()` (`app/application/services/registration.py`)
+      wraps `User.objects.create_user()` + `School.objects.create()` +
+      `SchoolMembership.objects.create()` in one `transaction.atomic()`
+      block, validating the password with Django's configured
+      validators before anything is persisted.
+- [x] Prevent accidental creation of orphaned school/user records — the
+      same `transaction.atomic()` block; `RegistrationView.form_valid()`
+      also catches the realistic username-taken race (`IntegrityError`)
+      and confirms the School it would have orphaned was rolled back.
+
+  Implemented in `22d3225`, with service/form/view tests
+  (`tests/application/test_registration.py`,
+  `tests/presentation/test_registration_form.py`,
+  `tests/integration/test_registration_view.py`).
+  `load_demo_data`'s two demo principals (Phase 9) are created through
+  this same `register_principal()` call, not a separate path.
 
 ## Authorization
 
-- [ ] Replace inappropriate reliance on `is_staff` for school ownership.
-- [ ] Ensure principals can only manage their own school.
-- [ ] Decide whether different school roles are needed.
-- [ ] Add authorization tests.
+- [x] Replace inappropriate reliance on `is_staff` for school
+      ownership — already done in Phase 4 (only remaining `is_staff`
+      check is the Django Admin nav item).
+- [x] Ensure principals can only manage their own school — already done
+      in Phase 4B/4C/4D.
+- [ ] Decide whether different school roles are needed — still open;
+      `SchoolMembership.role` only ever has `PRINCIPAL`. Tracked under
+      Open Decisions below.
+- [x] Add authorization tests — extensive coverage already exists from
+      Phase 4; Phase 8 added its own registration-specific tests
+      (listed above).
 
 ---
 
 # Phase 9 — Demo Data
 
-- [ ] Update `load_demo_data`.
-- [ ] Remove assumptions about one global AcademicYear.
-- [ ] Create a demo School.
-- [ ] Create a demo Principal/user if appropriate.
-- [ ] Create school-specific teachers.
-- [ ] Create school-specific rooms.
-- [ ] Create school-specific subjects.
-- [ ] Create school-specific student groups.
-- [ ] Create AcademicYear for the demo school.
-- [ ] Create periods and lessons.
-- [ ] Verify substitute-teacher generation.
+- [x] Update `load_demo_data`.
+- [x] Remove assumptions about one global AcademicYear.
+- [x] Create a demo School.
+- [x] Create a demo Principal/user if appropriate.
+- [x] Create school-specific teachers.
+- [x] Create school-specific rooms.
+- [x] Create school-specific subjects.
+- [x] Create school-specific student groups.
+- [x] Create AcademicYear for the demo school.
+- [x] Create periods and lessons.
+- [x] Verify substitute-teacher generation.
+
+  Implemented in `b4aa397`: `load_demo_data` now loads **two**
+  independent demo schools (Riverside High, Lincoln Academy) with
+  deliberately identical academic-year/subject/teacher/room/
+  student-group names, specifically to demonstrate that same-named
+  records stay fully isolated once they belong to different Schools.
+  Each demo principal (`principal_riverside`/`principal_lincoln`, both
+  `Demo-Pass-2026!`) is created through the same `register_principal()`
+  call the web registration flow uses (Phase 8), not a separate path.
+  The command is idempotent: re-running it reuses each demo principal's
+  existing School (looked up via their own `SchoolMembership`) rather
+  than creating a second one. Verified via
+  `tests/integration/test_load_demo_data_command.py`.
+
+  A pre-multi-school leftover school ("Default School", with generic
+  "Teacher 01"… names and 2100 lessons, created by the single-school
+  version of this command and never cleaned up) was identified and
+  deleted directly against the real dev database during the 2026-10-08
+  polish session below — it predated this rewrite and was never one of
+  the two demo schools.
 
 ---
 
-# Phase 10 — Testing
+# Phase 10 — Testing & Quality Audit
+
+Done. Split into two sessions: a read-only audit (no code changes) that
+inspected every test file against this checklist and produced a
+findings report, followed by an implementation session that fixed the
+one confirmed defect the audit found and closed the real coverage
+gaps. See the Session Log below for both.
 
 ## Unit/domain tests
 
-- [ ] Period validation.
-- [ ] Domain scheduling rules.
-- [ ] Conflict rules.
-- [ ] Substitute-teacher rules.
+- [x] Period validation (`tests/domain/test_timeslot_validation.py`,
+      `tests/infrastructure/test_period_constraints.py`).
+- [x] Domain scheduling rules (`tests/domain/test_lesson.py`).
+- [x] Conflict rules (`tests/application/test_conflict_service.py`
+      fake-repository unit tests, plus
+      `tests/infrastructure/test_django_lesson_conflicts.py` against
+      the real DB).
+- [x] Substitute-teacher rules
+      (`tests/application/test_substitution_service.py` — fairness,
+      tie-breaking, fallback, school exclusion).
 
 ## Application tests
 
-- [ ] ScheduleService.
-- [ ] ConflictService.
-- [ ] SubstitutionService.
-- [ ] Multi-school isolation.
+- [x] ScheduleService (`tests/application/test_schedule_service.py`).
+- [x] ConflictService (`tests/application/test_conflict_service.py`).
+- [x] SubstitutionService
+      (`tests/application/test_substitution_service.py`).
+- [x] Multi-school isolation — the single most thoroughly tested
+      concern in the whole suite; see the Integration/web row below.
 
 ## Infrastructure tests
 
-- [ ] Repository filtering.
-- [ ] Teacher queries.
-- [ ] Lesson queries.
-- [ ] AcademicYear queries.
-- [ ] School-specific data access.
+- [x] Repository filtering
+      (`tests/integration/test_django_lesson_repository.py`).
+- [x] Teacher queries
+      (`tests/infrastructure/test_django_lesson_conflicts.py::test_list_teachers_excludes_teachers_from_another_school`).
+- [x] Lesson queries (`tests/integration/test_django_lesson_repository.py`).
+- [x] AcademicYear queries (`tests/infrastructure/test_academic_year_school.py`).
+- [x] School-specific data access — covered throughout the
+      infrastructure and integration suites.
 
 ## Integration/web tests
 
-- [ ] Login.
-- [ ] Principal access.
-- [ ] AcademicYear access.
-- [ ] Teacher access.
-- [ ] Room access.
-- [ ] Subject access.
-- [ ] StudentGroup access.
-- [ ] Lesson access.
-- [ ] Schedule access.
-- [ ] Substitute access.
-- [ ] Cross-school access attempts return 403/404 and never expose data.
+- [x] Login — was a genuine gap (every other test authenticated via
+      `force_login()` or registration's auto-login; the real
+      `POST /accounts/login/` flow had zero direct coverage). Closed in
+      the implementation session: successful login, failed login
+      (wrong password), logout, and immediate access denial right
+      after logout (`tests/integration/test_web_pages.py`).
+- [x] Principal access (`tests/integration/test_current_school_access.py`).
+- [x] AcademicYear / Teacher / Room / Subject / StudentGroup access
+      (`tests/integration/test_crud_school_isolation.py`, parametrized
+      across all five).
+- [x] Lesson access (`tests/integration/test_crud_school_isolation.py`,
+      `tests/integration/test_web_pages.py`).
+- [x] Schedule access (`tests/integration/test_scheduling_school_isolation.py`).
+- [x] Substitute access — the dedicated "Teacher Substitution" page
+      was removed in the 2026-10-08 polish pass, but the underlying
+      access paths (`GeneratePlannedSubstitutionsView`, staff schedule,
+      `SubstitutionService.available_teachers()`) remain tested.
+- [x] Cross-school access attempts return 403/404 and never expose
+      data — verified both by status code and by asserting the
+      response *body* never contains the other school's data
+      (`test_is_staff_without_membership_cannot_use_whole_school_view`
+      and others reproduce the one real historical vulnerability found
+      in Phase 4D as a standing regression test).
 
 ## Regression
 
-- [ ] Run complete test suite.
-- [ ] Fix broken fixtures.
-- [ ] Verify existing functionality still works.
-- [ ] Test with at least two schools containing overlapping names/data.
+- [x] Run complete test suite — 339 passed, 0 failed.
+- [x] Fix broken fixtures — none were found broken; not applicable.
+- [x] Verify existing functionality still works —
+      `manage.py check` and `makemigrations --check --dry-run` both
+      clean.
+- [x] Test with at least two schools containing overlapping names/data
+      — `tests/integration/test_load_demo_data_command.py`'s
+      `test_load_demo_data_reuses_identical_names_across_independent_schools`
+      and `test_load_demo_data_never_mixes_lessons_across_the_two_schools`,
+      plus dozens of two-school isolation tests throughout.
+
+### Confirmed defect found and fixed
+
+`ProtectedDeleteMixin` correctly blocked deleting a Teacher/Room/
+Subject/StudentGroup/Period/AcademicYear still referenced by a Lesson,
+but the user never saw why: `object_confirm_delete.html` never
+rendered `form.non_field_errors`. Reproduced empirically (a throwaway,
+non-persisted test confirmed the exact symptom) before fixing. Fix:
+three lines in the template. Also found, via direct MRO tracing of
+Django's `BaseDeleteView`, that `ProtectedDeleteMixin.post()`'s own
+`except ProtectedError` handler was unreachable dead code — `post()`
+calls `self.form_valid()`, which dispatches to this mixin's
+`form_valid()` override first, so the exception is always caught there
+and never reaches `post()`'s own try/except. Removed the dead handler.
+Regression test: `tests/integration/test_protected_delete.py`,
+parametrized across all six affected resource types, plus one
+unrelated-resource-still-deletes-normally guard test.
+
+### Coverage gaps closed this session
+
+- Login/logout (`test_login_with_valid_credentials_redirects_to_schedule`,
+  `test_login_with_incorrect_password_shows_error_and_does_not_authenticate`,
+  `test_logout_redirects_to_login_and_ends_session`,
+  `test_protected_page_is_denied_immediately_after_logout`).
+- Lesson create/update/delete redirect destinations, previously only
+  checked for `302` without checking *where* — relevant because the
+  2026-10-08 polish pass changed these from the removed `lesson-list`
+  page to `schedule`, and nothing had verified the new destination.
+- Open-redirect protection (`_safe_next_url()`) — previously only the
+  "accept a safe `next`" path was exercised implicitly; the "reject an
+  unsafe `next`" path had no test at all. Verified these tests are
+  meaningful by temporarily removing the check and confirming they
+  fail, then restoring it.
+- `LessonWriteMixin.form_valid()`'s `except (CrossSchoolLessonError,
+  SchoolAuthorizationError)` branch — structurally unreachable through
+  a real form submission (`LessonForm`'s querysets are already scoped
+  to the current school), so tested with a narrowly-scoped
+  `monkeypatch` of the service factory rather than left uncovered.
+
+### Audit recommendations deliberately left unimplemented
+
+- `GeneratePlannedSubstitutionsView`'s defense-in-depth
+  `SchoolAuthorizationError` catch — the audit flagged it as untested,
+  but it's a backstop behind a view-layer check that's already tested,
+  and the service-level guard it wraps is already covered in
+  `tests/application/test_substitution_service.py`. Adding a test here
+  would be effort disproportionate to risk; left as-is.
+- Django Admin row-level school scoping — explicitly out of scope for
+  Phase 10 (a separate architectural decision; see §24 of
+  `PROJECT_CONTEXT.md`).
+- Production-readiness settings (`DEBUG`, `SECRET_KEY`,
+  `ALLOWED_HOSTS`) — explicitly Phase 11, untouched.
 
 ---
 
@@ -811,33 +973,33 @@ Tasks:
 
 ## Goal
 
-Implement the next small architectural step toward multi-school support.
+Phase 10: audit the existing test suite for real coverage gaps (not
+just "do the tests pass"), then close the gaps the audit actually
+found.
 
 ## Current status
 
-Phases 1–3 and Phase 4A–4C are implemented, verified, and committed.
-Phase 4D (cleanup and full authorization audit) is implemented and
-verified, and — per explicit instruction for this session — left
-**uncommitted** for review. The existing "principal" user still has not
-been attached to a school — `create_school` remains written but
-intentionally not run. The real dev database is migrated through
-`0012`; no migration was needed for Phase 4A, 4B, 4C, or 4D.
+Phases 1–10 are all implemented, verified, and committed (Phase 10
+pending this session's commit). Multi-school School Data Isolation
+(Phase 4) and Authentication/Registration (Phase 8) are functionally
+complete; so are the Period generation workflow (Phase 5), the
+two-school demo data set (Phase 9), and now a dedicated testing audit
+(Phase 10) — see the Phase 10 section above for the full checklist and
+findings, and the Session Log below for the two-session audit →
+implementation sequence. 339 tests pass (up from 330 at the start of
+Phase 10); `manage.py check` and `makemigrations --check --dry-run`
+are both clean. No migration has been needed since `0012` (Phase 3).
 
-Multi-school Phase 4 (School Data Isolation) is now functionally
-complete: current-school resolution and membership authorization
-(4A), CRUD isolation (4B), scheduling-subsystem isolation (4C), and
-UI/navigation consistency plus a final audit (4D) are all done. Django
-Admin row-level scoping, registration/onboarding, and any further
-`SchoolMembership`/role work remain explicitly out of scope, deferred
-to a later phase.
+Deferred, still out of scope: Django Admin row-level scoping, any
+`SchoolMembership` role beyond `PRINCIPAL`, and all of Phase 11
+(production settings are untouched — `DEBUG=True`, a hardcoded
+`SECRET_KEY`, and an empty `ALLOWED_HOSTS` are all still exactly as
+they were; this application is not production-ready).
 
 ## Immediate next step
 
-1. Review the Phase 4D diff and decide on committing.
-2. Decide whether/when to run `create_school` against the dev database.
-3. Decide what the next phase after Phase 4 should be (e.g. Django
-   Admin scoping, registration/onboarding, or something else) — none
-   of the roadmap phases beyond Phase 4 have been scoped yet.
+Phase 11 (production prep) or Phase 13 (portfolio polish) — neither
+has been started or scoped as its own work yet.
 
 ---
 
@@ -877,7 +1039,10 @@ prematurely.
       is used instead — see the Phase 6 notes above. Still open for
       Period/Lesson more broadly).
 - [ ] Final Django Admin policy.
-- [ ] Final registration/user onboarding flow.
+- [x] Final registration/user onboarding flow — resolved by Phase 8:
+      self-service registration (`register_principal()`,
+      `RegistrationView`); no invitation/multi-user-per-school flow
+      exists yet, but none was planned for this phase.
 - [ ] Whether public timetable browsing should be supported and how
       schools are selected.
 - [ ] Production hosting provider.
@@ -1464,3 +1629,212 @@ Review the diff, commit when ready, then decide what comes after
 Phase 4 (Django Admin scoping and registration/onboarding are the two
 explicitly-deferred candidates, but neither has been scoped as its own
 phase yet).
+
+## 2026-09-19 (continued) — Phases 5, 6, 8, 9: retroactively documented
+
+The Phase 4D diff above was committed (`ae0e7ad`), and three more
+phases were implemented and committed the same day, but this document
+was never updated for any of them at the time — their checkboxes sat
+unchecked for weeks while the actual code moved on. This entry
+backfills that record from the commit history rather than rewriting
+history as if it had been tracked live; see the Phase 5/8/9 sections
+above for the checklist detail.
+
+- `b7a3335` **Add period generation workflow** — Phase 5. A
+  `PeriodGenerationService` that bulk-creates a school's first period
+  schedule from a lesson count, start time, duration, and breaks,
+  rather than a general per-field timetable-configuration system.
+- `05dde95` **Harden lesson school isolation** — the Phase 6 audit
+  (this is the one commit that *did* update this document at the
+  time — see the Phase 6 section above for its own detail).
+- `22d3225` **Add principal registration flow** — Phase 8. Self-service
+  registration (`register_principal()`, atomic User+School+
+  SchoolMembership creation, `RegistrationView`); Django's existing
+  built-in login view needed no changes.
+- `b4aa397` **Add multi-school demo data** — Phase 9. Rewrote
+  `load_demo_data` to seed two independent, identically-structured
+  demo schools instead of one, specifically to exercise isolation.
+
+### Current task
+
+Phases 1–9 are implemented, verified, and committed (confirmed via a
+fresh `manage.py check` / `makemigrations --check --dry-run` / full
+pytest run during this doc-sync session, not just by reading the old
+commits). Phase 10/11/13 remain unscoped.
+
+### Next
+
+Pick one of Phase 10 (testing audit), Phase 11 (production prep), or
+Phase 13 (portfolio polish) as the next real slice of work.
+
+## 2026-10-08 — Polish pass: demo readiness
+
+Not a roadmap phase — a focused cleanup pass preparing the app to be
+shown to someone else, prompted by manually attaching the old
+"principal" user to "Default School" via `create_school` and then
+looking at the live site end to end.
+
+### Completed
+
+- Removed the duplicate navigation link: the "School Scheduler" brand
+  and the "Timetable" nav item both pointed at `schedule`. Kept
+  **Timetable** (every existing navigation test already treated it as
+  the canonical link across anonymous/regular/principal/admin states)
+  and changed the brand in `base.html` from an `<a>` to a plain
+  `<span>` — one template change fixes both the logged-out and
+  logged-in nav, since they share it.
+- Added a "Try the demo" panel to the login page
+  (`registration/login.html`) showing both demo principals' real
+  credentials from `load_demo_data.py`
+  (`principal_riverside`/`principal_lincoln`, both `Demo-Pass-2026!`).
+- Added a "Log in to explore the demo schedule" call-to-action to the
+  public landing state of `schedule.html`, shown only to anonymous
+  visitors.
+- **Removed the Lessons list page and the Teacher Substitution page**
+  as redundant: `LessonListView` and its `/lessons/` URL/nav item are
+  gone (Lesson create/edit/delete, reached from the schedule page
+  itself, are untouched — their redirect target changed from the
+  removed list page to `schedule`). `TeacherSubstitutionView`/
+  `TeacherSubstitutionForm`/its template/URL/nav item are gone; the
+  underlying `SubstitutionService.available_teachers()` logic was left
+  completely untouched (it has its own independent unit tests and
+  wasn't reachable only from that page).
+- **Deleted a dead "Default School"** from the real dev database: 80
+  teachers named "Teacher 01"… "Teacher 80" and 2100 lessons, left over
+  from the single-school version of `load_demo_data` and never cleaned
+  up by any later migration. Backed up `db.sqlite3` first; deleted its
+  `Lesson` rows before the `School` row itself, since `Lesson`'s FKs to
+  Teacher/Room/Subject/StudentGroup/Period are `PROTECT` and would have
+  blocked a cascading delete otherwise. Verified before and after that
+  Riverside High and Lincoln Academy (the two real demo schools) were
+  untouched.
+- Updated/removed the tests that covered the removed pages
+  (`test_web_pages.py`, `test_registration_view.py`,
+  `test_crud_school_isolation.py`,
+  `test_scheduling_school_isolation.py`).
+
+### Verification performed
+
+- `manage.py check` → no issues.
+- `makemigrations --check --dry-run` → no changes detected (no schema
+  change was made or needed).
+- Full pytest suite → 323 passed, 0 failed (330 before this session;
+  7 tests covered the two removed pages and were deleted, not
+  skipped).
+- Confirmed in a real browser: single nav link, demo CTA, both demo
+  credentials visible on the login page.
+
+### Current task
+
+Implemented, verified, and committed (`a0b130e`).
+
+### Next
+
+Same as above: Phase 10 (testing audit), Phase 11 (production prep),
+or Phase 13 (portfolio polish).
+
+## 2026-10-09 — Phase 10: Testing & Quality Audit
+
+### Completed (audit session, read-only)
+
+Inspected all 42 test files, every view/form/service/model, and ran a
+line-coverage report (`coverage`, installed temporarily in the venv
+only, never added to `requirements.txt`, uninstalled afterward) to find
+executed-but-unasserted branches. No code was changed in this session.
+Headline finding: multi-school authorization/isolation is the
+best-tested part of the codebase — no confirmed cross-school leak was
+found. One confirmed defect was found (see below), plus a cluster of
+real gaps concentrated in exception-handling branches and in the
+2026-10-08 polish pass's own changes. Full findings, severity
+classification, and file/line references are in the audit report
+itself (not duplicated here — see the conversation history for the
+complete report); the Phase 10 section above and this entry capture
+the outcome, not the full writeup.
+
+### Completed (implementation session)
+
+- **Fixed the confirmed defect**: `ProtectedDeleteMixin` correctly
+  blocked deletes of Lesson-referenced resources, but
+  `object_confirm_delete.html` never rendered `form.non_field_errors`,
+  so the user saw no explanation. Fixed with a 3-line template
+  addition, mirroring the existing `object_form.html` convention.
+  Verified empirically with a throwaway, non-persisted test before
+  fixing (confirmed the exact symptom: 200, object survives, no error
+  text in the response body) — deleted immediately after, never
+  committed.
+- **Removed confirmed dead code**: traced Django 5.2's
+  `BaseDeleteView` MRO directly (`BaseDeleteView.post()` calls
+  `self.form_valid()`, which dispatches to `ProtectedDeleteMixin`'s
+  own override first) to prove `ProtectedDeleteMixin.post()`'s
+  `except ProtectedError` handler could never fire. Removed it.
+- **Added `tests/integration/test_protected_delete.py`**: the delete-
+  blocked-with-error-shown regression test, parametrized across all
+  six affected resource types (Teacher, Room, Subject, StudentGroup,
+  Period, AcademicYear), plus one guard test that an unreferenced
+  resource still deletes normally.
+- **Closed the login/logout gap**: added 4 tests to
+  `tests/integration/test_web_pages.py` — valid login redirects to
+  `LOGIN_REDIRECT_URL` ("schedule"), invalid login shows Django's
+  stock error and doesn't authenticate, logout redirects to
+  `LOGOUT_REDIRECT_URL` ("login") and clears the session, and a
+  protected page is denied immediately after logout. Verified the
+  actual configured redirect targets in `config/settings.py` rather
+  than assuming Django defaults.
+- **Verified lesson redirect destinations**: added `response.url`
+  assertions to the existing lesson create/update tests and one new
+  lesson-delete test — these previously checked only `302`, which
+  would not have caught the 2026-10-08 polish pass's redirect target
+  silently pointing somewhere unintended.
+- **Added open-redirect regression tests** for `_safe_next_url()`
+  (`SchedulerCreateView`/`SchedulerUpdateView`): an unsafe scheme-
+  relative/external `next` is rejected in favor of `list_url_name`; a
+  safe internal `next` is still honored. Verified these tests are
+  meaningful by temporarily neutering the check in both call sites,
+  confirming both new "rejects" tests failed, then restoring the real
+  implementation.
+- **Added the `LessonWriteMixin.form_valid()` cross-school-error
+  branch test**: this branch is structurally unreachable through a
+  real form submission (`LessonForm`'s querysets are already scoped to
+  the current school), so a narrowly-scoped `monkeypatch` of
+  `build_schedule_service` (local to one test) was used to make the
+  service raise `CrossSchoolLessonError`, proving the view catches it
+  as a clean form error rather than a 500.
+- **Deliberately not added**: a test for
+  `GeneratePlannedSubstitutionsView`'s defense-in-depth
+  `SchoolAuthorizationError` catch — it's a backstop behind an
+  already-tested view-layer check, and the service-level guard it
+  wraps already has its own tests in
+  `tests/application/test_substitution_service.py`.
+- **Cleaned up legacy duplicate tests**: `tests/test_teacher.py` and
+  `tests/test_timeslot.py` (root-level, pre-reorganization) were not
+  simply deleted — each contained one assertion not covered elsewhere
+  (`Teacher.email` round-tripping; a valid domain `Period`'s fields all
+  round-tripping together). Migrated both into their modern homes
+  (`tests/infrastructure/test_resource_school_ownership.py`,
+  `tests/domain/test_timeslot_validation.py`) before deleting the
+  originals.
+
+### Verification performed
+
+- Full pytest suite → **339 passed, 0 failed** (330 → 339; +16 tests:
+  +7 protected-delete, +4 login/logout, +1 lesson-delete-redirect,
+  +3 open-redirect, +1 cross-school-error branch, +2 migrated from the
+  2 deleted legacy files — net matches exactly).
+- `manage.py check` → no issues.
+- `makemigrations --check --dry-run` → no changes detected (no schema
+  change was made or needed).
+- `git diff --stat` reviewed: only
+  `app/presentation/web/views.py` (11 lines, the dead-code removal) and
+  `app/presentation/web/templates/scheduler/object_confirm_delete.html`
+  (3 lines, the fix) outside the test suite — no unrelated files, no
+  database changes, no new dependencies in `requirements.txt`.
+
+### Current task
+
+Phase 10 implemented and verified. Working tree uncommitted, pending
+review.
+
+### Next
+
+Phase 11 (production prep) or Phase 13 (portfolio polish) — neither
+scoped yet.

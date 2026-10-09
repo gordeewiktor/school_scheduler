@@ -84,6 +84,67 @@ def test_login_page_renders(client):
 
 
 @pytest.mark.django_db
+def test_login_with_valid_credentials_redirects_to_schedule(client, make_user):
+    make_user("ada", password="correct-password")
+
+    response = client.post(
+        reverse("login"), {"username": "ada", "password": "correct-password"}
+    )
+
+    assert response.status_code == 302
+    # LOGIN_REDIRECT_URL = "schedule" (config/settings.py); no `next`
+    # was supplied, so this is Django's own default-redirect behavior,
+    # not anything this project customized.
+    assert response.url == reverse("schedule")
+    assert "_auth_user_id" in client.session
+
+
+@pytest.mark.django_db
+def test_login_with_incorrect_password_shows_error_and_does_not_authenticate(
+    client, make_user
+):
+    make_user("ada", password="correct-password")
+
+    response = client.post(
+        reverse("login"), {"username": "ada", "password": "wrong-password"}
+    )
+
+    assert response.status_code == 200
+    assert b"Please enter a correct" in response.content
+    assert "_auth_user_id" not in client.session
+
+
+@pytest.mark.django_db
+def test_logout_redirects_to_login_and_ends_session(client, make_user):
+    user = make_user("ada")
+    client.force_login(user)
+
+    response = client.post(reverse("logout"))
+
+    assert response.status_code == 302
+    # LOGOUT_REDIRECT_URL = "login" (config/settings.py).
+    assert response.url == reverse("login")
+    assert "_auth_user_id" not in client.session
+
+
+@pytest.mark.django_db
+def test_protected_page_is_denied_immediately_after_logout(
+    client, make_user, make_school, make_membership
+):
+    user = make_user("ada")
+    school = make_school("Riverside School")
+    make_membership(user, school)
+    client.force_login(user)
+    assert client.get(reverse("staff-schedule")).status_code == 200
+
+    client.post(reverse("logout"))
+
+    response = client.get(reverse("staff-schedule"))
+    assert response.status_code == 302
+    assert response.url.startswith(reverse("login"))
+
+
+@pytest.mark.django_db
 def test_schedule_home_is_public(client):
     response = client.get(reverse("schedule"))
     assert response.status_code == 200
@@ -183,6 +244,10 @@ def test_schedule_uses_period_columns_and_breaks(authenticated_client):
 def test_lesson_form_writes_through_service(authenticated_client, lesson_form_data):
     response = authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
     assert response.status_code == 302
+    # The "Lessons" list page was removed; LessonCreateView now falls
+    # back to the schedule page when no `next` is posted (there isn't
+    # one here — see post_data()).
+    assert response.url == reverse("schedule")
     lesson = Lesson.objects.get()
     assert lesson.day == "MONDAY"
     assert lesson.start_period == lesson_form_data["start_period"]
@@ -215,6 +280,40 @@ def test_lesson_form_returns_conflict_on_same_teacher(authenticated_client, less
     assert response.status_code == 200
     assert "Teacher is already teaching then." in response.context["form"].errors["teacher"]
     assert Lesson.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_lesson_form_surfaces_cross_school_error_as_a_form_error(
+    authenticated_client, lesson_form_data, monkeypatch
+):
+    # LessonForm's own querysets are already scoped to the current
+    # school (Phase 4B), so a real form submission can never produce a
+    # CrossSchoolLessonError/SchoolAuthorizationError in practice —
+    # that's why this branch of LessonWriteMixin.form_valid() has no
+    # coverage otherwise (Phase 10 audit finding G1). A narrowly scoped
+    # monkeypatch of the service factory is the only way to exercise it
+    # without bypassing the form, and it still verifies real view
+    # behavior: does the view catch the exception and render a clean
+    # form error, rather than a 500?
+    from app.domain.exceptions import CrossSchoolLessonError
+    from app.presentation.web import views as web_views
+
+    class ExplodingScheduleService:
+        def create_lesson(self, lesson, school_id=None):
+            raise CrossSchoolLessonError("Resources must all belong to the same school.")
+
+    monkeypatch.setattr(
+        web_views, "build_schedule_service", lambda: ExplodingScheduleService()
+    )
+
+    response = authenticated_client.post(reverse("lesson-create"), post_data(lesson_form_data))
+
+    assert response.status_code == 200
+    assert (
+        "Resources must all belong to the same school."
+        in response.context["form"].non_field_errors()
+    )
+    assert Lesson.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -507,6 +606,7 @@ def test_lesson_edit_can_add_substitution_teacher(authenticated_client, lesson_f
 
     lesson.refresh_from_db()
     assert response.status_code == 302
+    assert response.url == reverse("schedule")
     assert lesson.planned_substitute == substitute
 
 
@@ -597,8 +697,73 @@ def test_existing_lesson_editing_continues_to_update_core_fields(
 
     lesson.refresh_from_db()
     assert response.status_code == 302
+    assert response.url == reverse("schedule")
     assert lesson.room == new_room
     assert lesson.notes == "Bring lab materials."
+
+
+@pytest.mark.django_db
+def test_lesson_delete_redirects_to_schedule_and_removes_the_lesson(
+    authenticated_client, lesson_form_data
+):
+    lesson = Lesson.objects.create(
+        teacher=lesson_form_data["teacher"],
+        subject=lesson_form_data["subject"],
+        room=lesson_form_data["room"],
+        student_group=lesson_form_data["student_group"],
+        day="MONDAY",
+        start_period=lesson_form_data["start_period"],
+    )
+
+    response = authenticated_client.post(reverse("lesson-delete", args=[lesson.pk]))
+
+    assert response.status_code == 302
+    # The "Lessons" list page was removed; LessonDeleteView's
+    # list_url_name now points at "schedule".
+    assert response.url == reverse("schedule")
+    assert not Lesson.objects.filter(pk=lesson.pk).exists()
+
+
+@pytest.mark.django_db
+def test_update_view_rejects_an_unsafe_next_url(authenticated_client):
+    teacher = Teacher.objects.create(school=authenticated_client.school, name="Ada")
+
+    response = authenticated_client.post(
+        reverse("teacher-update", args=[teacher.pk]),
+        {"name": "Ada", "email": "", "next": "//evil.example.com/steal"},
+    )
+
+    assert response.status_code == 302
+    # _safe_next_url() rejects a scheme-relative external host and
+    # falls back to list_url_name ("teacher-list"), never the
+    # attacker-supplied destination.
+    assert response.url == reverse("teacher-list")
+    assert response.url != "//evil.example.com/steal"
+
+
+@pytest.mark.django_db
+def test_create_view_rejects_an_unsafe_next_url(authenticated_client):
+    response = authenticated_client.post(
+        reverse("teacher-create"),
+        {"name": "Ada", "email": "", "next": "https://evil.example.com/steal"},
+    )
+
+    assert response.status_code == 302
+    assert response.url == reverse("teacher-list")
+
+
+@pytest.mark.django_db
+def test_update_view_honors_a_safe_internal_next_url(authenticated_client):
+    teacher = Teacher.objects.create(school=authenticated_client.school, name="Ada")
+    safe_next = reverse("schedule") + "?view=whole_school"
+
+    response = authenticated_client.post(
+        reverse("teacher-update", args=[teacher.pk]),
+        {"name": "Ada", "email": "", "next": safe_next},
+    )
+
+    assert response.status_code == 302
+    assert response.url == safe_next
 
 
 @pytest.mark.django_db

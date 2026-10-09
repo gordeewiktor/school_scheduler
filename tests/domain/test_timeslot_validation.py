@@ -20,6 +20,24 @@ def period(**overrides):
     return Period(**values)
 
 
+def test_period_stores_all_fields_for_a_valid_period():
+    # Migrated from the old root-level tests/test_timeslot.py (removed
+    # as part of the Phase 10 audit cleanup) — this file otherwise only
+    # tests rejection of invalid periods, never that a valid one's
+    # fields actually round-trip.
+    instance = period(
+        academic_year_id=2026, name="Lunch", order=4,
+        start_time=time(12), end_time=time(13), kind=PeriodKind.BREAK,
+    )
+
+    assert instance.academic_year_id == 2026
+    assert instance.name == "Lunch"
+    assert instance.order == 4
+    assert instance.start_time == time(12)
+    assert instance.end_time == time(13)
+    assert instance.kind == PeriodKind.BREAK
+
+
 def test_period_rejects_equal_start_and_end():
     with pytest.raises(InvalidPeriodError):
         period(end_time=time(9))

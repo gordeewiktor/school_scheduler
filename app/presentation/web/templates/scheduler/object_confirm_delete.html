@@ -4,6 +4,9 @@
 
 {% block content %}
 <h1 class="h2 mb-3">{{ title }}</h1>
+{% if form.non_field_errors %}
+    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+{% endif %}
 <p>Delete <strong>{{ object }}</strong>?</p>
 <form method="post">
     {% csrf_token %}

@@ -92,18 +92,17 @@ class SchoolScopedQuerysetMixin:
 
 
 class ProtectedDeleteMixin:
+    # Django's BaseDeleteView.post() calls self.form_valid(form), which
+    # dispatches here (this mixin precedes BaseDeleteView in the MRO) —
+    # so this is the only place ProtectedError is ever actually raised
+    # from. A previous post() override here that also caught
+    # ProtectedError was unreachable dead code for exactly that reason.
     def form_valid(self, form):
         try:
             return super().form_valid(form)
         except ProtectedError:
             form.add_error(None, "This item is used by a lesson and cannot be deleted.")
             return self.form_invalid(form)
-
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        try:
-            return super().post(request, *args, **kwargs)
-        except ProtectedError:
-            return redirect(self.get_success_url())
 
 
 class SchedulerListView(SchoolScopedQuerysetMixin, SchoolAccessRequiredMixin, ListView):

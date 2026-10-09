@@ -17,6 +17,18 @@ MODELS = [Teacher, Room, Subject, StudentGroup]
 
 
 @pytest.mark.django_db
+def test_teacher_keeps_name_and_email():
+    # Migrated from the old root-level tests/test_teacher.py (removed
+    # as part of the Phase 10 audit cleanup) — this was the only test
+    # anywhere asserting Teacher.email round-trips correctly.
+    school = School.objects.create(name="Test School")
+    teacher = Teacher.objects.create(school=school, name="Viktor", email="viktor@example.com")
+
+    assert teacher.name == "Viktor"
+    assert teacher.email == "viktor@example.com"
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize("model", MODELS)
 def test_resource_requires_a_school(model):
     with pytest.raises(IntegrityError):
