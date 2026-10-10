@@ -65,7 +65,9 @@ Current technology includes:
 
 - Python
 - Django
-- SQLite for local development
+- PostgreSQL for local development, testing, and production (standard
+  backend as of Phase 11's database migration; see
+  `PROJECT_ROADMAP.md` and `README.md` for setup)
 - pytest / Django testing
 - Git
 - HTML/CSS/templates
@@ -100,7 +102,6 @@ The project currently has approximately this structure:
     ├── tests/
     ├── docs/
     │   └── screenshots/
-    ├── db.sqlite3
     ├── manage.py
     ├── PROJECT_BLUEPRINT.md
     ├── PROJECT_CONTEXT.md

@@ -899,21 +899,54 @@ unrelated-resource-still-deletes-normally guard test.
 
 # Phase 11 — Production Preparation
 
+Phase 11 is in progress, not complete. A read-only audit ran first
+(settings/security/deployment-readiness inspection, no changes), then
+one specific item — the database — was implemented and verified. The
+rest of the checklist below is still open.
+
 Before deployment:
 
-- [ ] Review production Django settings.
-- [ ] Move secrets to environment variables.
-- [ ] Configure `DEBUG=False`.
-- [ ] Configure allowed hosts.
-- [ ] Configure CSRF/trusted origins appropriately.
-- [ ] Configure production database.
-- [ ] Configure static files.
-- [ ] Configure media files if required.
-- [ ] Configure logging.
-- [ ] Configure error handling.
-- [ ] Review authentication/security settings.
-- [ ] Review school data isolation.
-- [ ] Review database backups.
+- [ ] Review production Django settings — the audit covered this (see
+      Session Log); fixes beyond the database are still open.
+- [~] Move secrets to environment variables — **database credentials
+      only** (`DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_PORT`, via
+      `.env` + `python-dotenv`, required with no silent fallback).
+      `SECRET_KEY` is still hardcoded — not part of this session's
+      scope.
+- [ ] Configure `DEBUG=False` — audited, confirmed still hardcoded
+      `True`; not changed this session.
+- [ ] Configure allowed hosts — audited, confirmed still empty; not
+      changed this session.
+- [ ] Configure CSRF/trusted origins appropriately — not addressed;
+      contingent on a hosting/domain decision per the audit.
+- [x] Configure production database — **PostgreSQL is now the
+      project's standard backend for dev, test, and (once deployed)
+      production alike, replacing SQLite entirely.** See the Session
+      Log entry below for the full implementation and verification
+      detail. "Production" here means the application's database
+      layer is production-capable and verified locally; an actual
+      deployed production instance is Phase 12.
+- [ ] Configure static files — audited (`collectstatic` confirmed to
+      fail: no `STATIC_ROOT`); not fixed this session.
+- [ ] Configure media files if required — not assessed; this
+      application has no file-upload features today.
+- [ ] Configure logging — audited (confirmed production errors would
+      be silent with no `LOGGING` config); not fixed this session.
+- [ ] Configure error handling — not addressed beyond the audit.
+- [ ] Review authentication/security settings — covered by the audit;
+      fixes (`DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`, HTTPS/cookie
+      settings) remain open.
+- [x] Review school data isolation — re-verified intact after the
+      PostgreSQL migration: full 339-test suite passing against
+      Postgres, plus a direct HTTP-level check (login, current-school
+      resolution, scoped teacher list, and a 404 on a cross-school
+      IDOR attempt) against the actual migrated demo data. See the
+      Session Log.
+- [x] Review database backups — a `pg_dump`/`psql`-restore workflow is
+      now documented in `README.md`; a verified SQLite backup exists
+      at `backups/db.sqlite3.pre-postgres-backup-20261010` (gitignored,
+      kept as a rollback reference, not a substitute for the new
+      Postgres-native backup workflow going forward).
 
 ---
 
@@ -973,33 +1006,30 @@ Tasks:
 
 ## Goal
 
-Phase 10: audit the existing test suite for real coverage gaps (not
-just "do the tests pass"), then close the gaps the audit actually
-found.
+Phase 11: prepare for production. Audited settings/security/
+deployment-readiness first (read-only), then — per explicit decision —
+implemented and verified PostgreSQL as the standard database backend
+for dev, test, and production.
 
 ## Current status
 
-Phases 1–10 are all implemented, verified, and committed (Phase 10
-pending this session's commit). Multi-school School Data Isolation
-(Phase 4) and Authentication/Registration (Phase 8) are functionally
-complete; so are the Period generation workflow (Phase 5), the
-two-school demo data set (Phase 9), and now a dedicated testing audit
-(Phase 10) — see the Phase 10 section above for the full checklist and
-findings, and the Session Log below for the two-session audit →
-implementation sequence. 339 tests pass (up from 330 at the start of
-Phase 10); `manage.py check` and `makemigrations --check --dry-run`
-are both clean. No migration has been needed since `0012` (Phase 3).
+Phases 1–10 are complete. Phase 11 is **in progress, not complete**:
+the database is now PostgreSQL everywhere (verified — see the Phase 11
+section and 2026-10-10 Session Log entry), but `DEBUG`, `SECRET_KEY`,
+`ALLOWED_HOSTS`, HTTPS/cookie security, static files, and logging are
+all still exactly as the audit found them — this application remains
+not production-ready. 339 tests pass against PostgreSQL;
+`manage.py check`, `makemigrations --check --dry-run`, and
+`migrate --check` are all clean.
 
 Deferred, still out of scope: Django Admin row-level scoping, any
-`SchoolMembership` role beyond `PRINCIPAL`, and all of Phase 11
-(production settings are untouched — `DEBUG=True`, a hardcoded
-`SECRET_KEY`, and an empty `ALLOWED_HOSTS` are all still exactly as
-they were; this application is not production-ready).
+`SchoolMembership` role beyond `PRINCIPAL`.
 
 ## Immediate next step
 
-Phase 11 (production prep) or Phase 13 (portfolio polish) — neither
-has been started or scoped as its own work yet.
+Finish Phase 11: env-driven `DEBUG`/`SECRET_KEY`/`ALLOWED_HOSTS`,
+HTTPS/cookie settings, `STATIC_ROOT` + static serving, and minimal
+`LOGGING` — all identified by the audit, none implemented yet.
 
 ---
 
@@ -1838,3 +1868,149 @@ review.
 
 Phase 11 (production prep) or Phase 13 (portfolio polish) — neither
 scoped yet.
+
+## 2026-10-10 — Phase 11: Production readiness audit, then PostgreSQL migration
+
+### Completed (read-only audit, no changes)
+
+Inspected `config/settings.py`, `requirements.txt`, `app/admin.py`,
+templates, `.gitignore`, and git history; ran `manage.py check
+--deploy` and a non-writing `collectstatic --dry-run --no-input`.
+Findings (Critical unless noted): `DEBUG=True` hardcoded;
+`SECRET_KEY` hardcoded to an obvious placeholder (checked its full git
+history — never a real secret, so no retroactive exposure, just not
+rotatable without a code change); `ALLOWED_HOSTS` empty (nothing would
+serve in production until set); no HTTPS/cookie-security settings
+(High); no `STATIC_ROOT` — `collectstatic` confirmed to fail outright;
+no `LOGGING` config — confirmed via Django's own `DEFAULT_LOGGING`
+that production errors would be completely silent (High); SQLite as
+the only database, no production alternative wired up (High,
+resolved below). Confirmed Django Admin has no row-level school
+scoping (pre-existing, documented, explicitly out of scope to redesign
+here) but that neither demo principal is `is_staff`, so neither can
+reach it today — the only way that risk materializes is if a
+staff/superuser account is deliberately created for maintenance, which
+is a decision for the project owner, not a code defect.
+
+### Completed (PostgreSQL migration)
+
+Per explicit decision, PostgreSQL becomes the standard backend for
+dev, test, and production — not a stopgap. No portability issues were
+found requiring an architectural decision: no raw SQL, no
+SQLite-specific fields/behavior, no backend-sensitive test assertions
+anywhere in `app/` or `tests/` (confirmed by direct inspection, not
+assumed).
+
+- Backed up `db.sqlite3` to `backups/db.sqlite3.pre-postgres-backup-20261010`
+  (new gitignored `backups/` directory) before touching anything;
+  verified independently via raw `sqlite3` (`PRAGMA integrity_check` →
+  `ok`) and a SHA-256 checksum match. The original `db.sqlite3` was
+  confirmed byte-identical (same checksum) at the end of the session —
+  never modified.
+- Installed PostgreSQL 16 via Homebrew (approved explicitly before
+  running) and started it as a background service. Created a
+  dedicated `school_scheduler` role and `school_scheduler_dev`
+  database (plus `CREATEDB` on the role — required for
+  `pytest-django`'s automatic, isolated `test_<DB_NAME>` database;
+  this is what makes "tests never touch the dev/production database"
+  actually true rather than just configured).
+- `config/settings.py`: `DATABASES` now reads `DB_NAME`/`DB_USER`/
+  `DB_PASSWORD` (required, via a small `_required_env()` helper that
+  raises `ImproperlyConfigured` naming the missing variable — verified
+  empirically, not assumed) and `DB_HOST`/`DB_PORT` (optional,
+  `localhost`/`5432`). `python-dotenv` loads a gitignored `.env` for
+  local convenience; a real deployment sets the same variables
+  directly. No other settings were touched — `SECRET_KEY`, `DEBUG`,
+  and `ALLOWED_HOSTS` remain exactly as the audit found them.
+- `requirements.txt`: added `psycopg[binary]` (the driver) and
+  `python-dotenv`. Nothing else changed.
+- Added `.env.example` (committed, no secrets) and a local `.env`
+  (gitignored).
+- Ran `migrate` against the fresh, empty Postgres database — all 12
+  `app` migrations plus Django's own applied cleanly; schema verified
+  directly (`\dt`, `\d app_lesson` — correct tables, FKs, indexes).
+- Exported the real SQLite data with `dumpdata`, excluding
+  `contenttypes`, `auth.permission`, `admin.logentry`, and
+  `sessions.session` (Django-regenerated/ephemeral — importing them
+  risks ID collisions with what `migrate` already created). Used a
+  throwaway, untracked settings module to point `dumpdata` at the old
+  SQLite file without touching the real (now Postgres-only)
+  `config/settings.py`; deleted it immediately after. 1125 records
+  exported (2 Schools, 3 Users, 2 SchoolMemberships, 2 AcademicYears,
+  32 Teachers, 20 Rooms, 20 Subjects, 20 StudentGroups, 24 Periods,
+  1000 Lessons) — an exact match for a direct query of the live
+  SQLite database taken at the start of the session.
+- Loaded all 1125 records into Postgres via `loaddata` — primary keys
+  preserved exactly (School ids 2/3, membership ids 1/2, etc.).
+  Confirmed Django's `loaddata` resets PostgreSQL sequences
+  automatically after loading explicit PKs (read its source to
+  verify, rather than assume) — then proved it empirically by creating
+  and deleting a throwaway `School`/`Teacher` and confirming the new
+  ids didn't collide with existing ones.
+
+### Notable data finding
+
+The database was **not** demo-data-only, as flagged before assuming
+otherwise. Beyond the two demo schools (Riverside High, Lincoln
+Academy) and their principals, there's an orphaned superuser account,
+`principal` (user id 1, `is_staff=True`, `is_superuser=True`, **no**
+`SchoolMembership`) — a leftover from early development, predating
+even the "Default School" deleted in the 2026-10-08 polish pass. It
+was preserved through the migration untouched, per instruction not to
+clean up data during this work; its existence is now written down
+here rather than silently carried forward.
+
+### Verification performed
+
+- `manage.py check`, `makemigrations --check --dry-run`, and
+  `migrate --check` all clean, run twice (against the empty database
+  and again after loading data).
+- Full pytest suite against PostgreSQL → **339 passed**, 0 failed
+  (159s — slower than SQLite's ~52s, as expected over a real
+  connection; not a concern). Confirmed the ephemeral
+  `test_school_scheduler_dev` database was created and destroyed
+  automatically, and that `school_scheduler_dev` (the real dev
+  database) had zero rows changed by the test run.
+- Record counts compared directly, model by model — exact match
+  between the original SQLite query and the migrated Postgres data
+  (see above).
+- `authenticate()` succeeded for both demo principals using their
+  real, known passwords — confirms password hashes survived the
+  dump/load round-trip, not just that rows exist.
+- Direct ORM check: zero Lessons combine resources from different
+  schools in the migrated data (the core multi-school integrity
+  invariant), and `principal_riverside`'s only membership is Riverside
+  High.
+- HTTP-level check via `django.test.Client` against the real migrated
+  dev database (not the ephemeral test database): login succeeded,
+  the schedule page correctly showed "Riverside High", the scoped
+  teacher list showed only Riverside's teachers, and a direct id-guess
+  at a Lincoln Academy teacher's edit URL returned 404. Lesson
+  creation/update and substitute generation were **not** additionally
+  exercised against this real data (to avoid mutating the preserved
+  dataset) — that behavior is already covered by the 339-test suite
+  passing against this same Postgres setup.
+
+### Files changed
+
+`config/settings.py`, `requirements.txt`, `.gitignore` (added
+`backups/`), `README.md` (new Database section), `PROJECT_CONTEXT.md`
+(§3, §4 — SQLite→PostgreSQL), plus new `.env.example` (committed) and
+`.env`/`backups/` (gitignored, not committed). No application,
+domain, service, view, or template code was touched — this was
+entirely configuration-layer, exactly as expected for a database
+engine swap with no portability issues found.
+
+### Current task
+
+PostgreSQL migration implemented and verified for local development.
+**Phase 11 is not complete** — `DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`,
+HTTPS/cookie settings, static files, and logging remain exactly as
+the audit found them, unaddressed. Nothing has been committed.
+
+### Next
+
+Address the remaining Phase 11 audit findings (env-driven `DEBUG`/
+`SECRET_KEY`/`ALLOWED_HOSTS`, HTTPS/cookie settings, `STATIC_ROOT` +
+static serving, minimal `LOGGING`) before considering Phase 11 done,
+or Phase 13 (portfolio polish) if that's prioritized first.

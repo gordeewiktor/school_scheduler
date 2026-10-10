@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 htmlcov/
 db.sqlite3
+backups/
 .env
 .DS_Store
 structure.txt

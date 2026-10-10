@@ -38,33 +38,81 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Demo Setup
+## Database
 
-Run the migrations, load the demo timetable, and start the development server:
+**PostgreSQL is the project's standard database backend, for local development, testing, and production alike — there is no SQLite fallback.** Connection settings always come from environment variables (never hardcoded), so the same `config/settings.py` works unchanged everywhere; only the environment differs.
+
+### Local PostgreSQL setup (macOS)
+
+Install and start PostgreSQL via Homebrew if you don't already have it running:
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+```
+
+Create a dedicated role and database for this project (`createuser`/`createdb` also work; this uses `psql` directly so the role gets `CREATEDB`, which the test suite needs to create and tear down its own isolated test database):
+
+```bash
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+psql postgres -c "CREATE ROLE school_scheduler WITH LOGIN PASSWORD 'choose-a-local-password' CREATEDB;"
+psql postgres -c "CREATE DATABASE school_scheduler_dev OWNER school_scheduler;"
+```
+
+### Required environment variables
+
+Copy `.env.example` to `.env` and fill in the password you chose above:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `DB_NAME` | yes | — | Database name (e.g. `school_scheduler_dev`) |
+| `DB_USER` | yes | — | Role name (e.g. `school_scheduler`) |
+| `DB_PASSWORD` | yes | — | Role password |
+| `DB_HOST` | no | `localhost` | Database host |
+| `DB_PORT` | no | `5432` | Database port |
+
+`.env` is gitignored and loaded automatically (via `python-dotenv`) when Django starts — nothing elsewhere in the codebase reads these variables directly; they're only ever used to build `DATABASES` in `config/settings.py`. If a required variable is missing, Django raises a clear `ImproperlyConfigured` error naming exactly which one, rather than silently falling back to any default database.
+
+A real deployment sets these same variables directly in its own environment (never via a committed `.env`) and should point at its own separate database/instance — development and production must never share one.
+
+### Migrations, tests, and demo data
 
 ```bash
 python manage.py migrate
-python manage.py load_demo_data
+python manage.py load_demo_data   # optional — populates two demo schools
 python manage.py runserver
 ```
 
 Open `http://127.0.0.1:8000/`.
 
-The demo data includes academic years, periods, rooms, subjects, student groups, teachers, and lessons so the timetable views are populated immediately.
-
-## Testing
-
-```bash
-pytest
-```
-
-If `pytest` is not available on your shell path, run it through the active environment:
-
 ```bash
 python -m pytest
 ```
 
-The test suite covers scheduling behavior, validation rules, repository integration, web pages, demo data loading, and presentation renderers.
+Each test run uses its own isolated `test_<DB_NAME>` database, automatically created and destroyed by `pytest-django`/Django — your real `DB_NAME` database (and any demo data in it) is never touched by the test suite. This is why the role needs `CREATEDB`.
+
+### Backing up and restoring
+
+Back up with Postgres's own dump tool (adjust `DB_NAME` to match your `.env`):
+
+```bash
+pg_dump -h localhost -U school_scheduler school_scheduler_dev > backups/school_scheduler_dev.sql
+```
+
+Restore from such a dump into a fresh database:
+
+```bash
+createdb -h localhost -U school_scheduler school_scheduler_dev_restored
+psql -h localhost -U school_scheduler school_scheduler_dev_restored < backups/school_scheduler_dev.sql
+```
+
+`backups/` is gitignored — dumps may contain password hashes and must never be committed.
+
+If you need to fall back to the pre-PostgreSQL SQLite workflow temporarily (e.g. to compare behavior), the previous `DATABASES` block pointing at `db.sqlite3` is in git history on the commit before the PostgreSQL migration; `db.sqlite3` itself is untouched and still present if it exists in your checkout.
 
 ## Project Structure
 
