@@ -901,52 +901,94 @@ unrelated-resource-still-deletes-normally guard test.
 
 Phase 11 is in progress, not complete. A read-only audit ran first
 (settings/security/deployment-readiness inspection, no changes), then
-one specific item — the database — was implemented and verified. The
-rest of the checklist below is still open.
+the database was migrated to PostgreSQL, then settings were made
+environment-driven and production security/logging/static-file
+configuration was added. **Deployment infrastructure itself (hosting,
+WSGI server, static-file serving, a real domain) remains entirely
+undone — see the checklist below.**
 
 Before deployment:
 
-- [ ] Review production Django settings — the audit covered this (see
-      Session Log); fixes beyond the database are still open.
-- [~] Move secrets to environment variables — **database credentials
-      only** (`DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_HOST`/`DB_PORT`, via
-      `.env` + `python-dotenv`, required with no silent fallback).
-      `SECRET_KEY` is still hardcoded — not part of this session's
-      scope.
-- [ ] Configure `DEBUG=False` — audited, confirmed still hardcoded
-      `True`; not changed this session.
-- [ ] Configure allowed hosts — audited, confirmed still empty; not
-      changed this session.
-- [ ] Configure CSRF/trusted origins appropriately — not addressed;
-      contingent on a hosting/domain decision per the audit.
-- [x] Configure production database — **PostgreSQL is now the
-      project's standard backend for dev, test, and (once deployed)
-      production alike, replacing SQLite entirely.** See the Session
-      Log entry below for the full implementation and verification
-      detail. "Production" here means the application's database
-      layer is production-capable and verified locally; an actual
-      deployed production instance is Phase 12.
-- [ ] Configure static files — audited (`collectstatic` confirmed to
-      fail: no `STATIC_ROOT`); not fixed this session.
-- [ ] Configure media files if required — not assessed; this
-      application has no file-upload features today.
-- [ ] Configure logging — audited (confirmed production errors would
-      be silent with no `LOGGING` config); not fixed this session.
-- [ ] Configure error handling — not addressed beyond the audit.
-- [ ] Review authentication/security settings — covered by the audit;
-      fixes (`DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`, HTTPS/cookie
-      settings) remain open.
-- [x] Review school data isolation — re-verified intact after the
-      PostgreSQL migration: full 339-test suite passing against
-      Postgres, plus a direct HTTP-level check (login, current-school
-      resolution, scoped teacher list, and a 404 on a cross-school
-      IDOR attempt) against the actual migrated demo data. See the
-      Session Log.
+- [x] Review production Django settings — audited, then acted on (see
+      Session Log).
+- [x] Move secrets to environment variables — `SECRET_KEY` now has
+      **no production fallback** (`ImproperlyConfigured` if unset when
+      `DJANGO_ENV=production`); database credentials were already
+      env-driven from the PostgreSQL migration.
+- [x] Configure `DEBUG=False` — now the production default
+      (`DJANGO_ENV=production`), individually overridable, parsed via
+      a safe boolean parser (`config/env.parse_bool`) rather than
+      `bool(os.environ.get(...))`.
+- [x] Configure allowed hosts — required with no default when
+      `DJANGO_ENV=production`; comma-separated parsing trims whitespace
+      and drops empty entries.
+- [x] Configure CSRF/trusted origins appropriately — `CSRF_TRUSTED_ORIGINS`
+      is environment-driven with no invented placeholder domain; empty
+      by default since it's only needed once a real HTTPS domain
+      exists.
+- [x] Configure production database — PostgreSQL is the project's
+      standard backend for dev, test, and production alike, replacing
+      SQLite entirely (see the 2026-10-10 Session Log entries).
+- [x] Configure static files — `STATIC_ROOT` set;
+      `collectstatic --noinput` verified to succeed (127 files, all
+      Django Admin's own CSS/JS — this application has none of its
+      own). Serving the collected files over HTTP still needs a
+      decision once a host is chosen — documented in `README.md`, not
+      yet implemented.
+- [ ] Configure media files if required — not applicable; this
+      application has no file-upload features.
+- [x] Configure logging — a minimal, always-on `LOGGING` config now
+      routes Django/application errors to stderr regardless of
+      `DEBUG`, matching a containerized/platform deployment's expected
+      log capture. No file handling, no email, no new dependency.
+- [~] Configure error handling — Django's own default production
+      error pages (plain, no information disclosure) now apply
+      correctly since `DEBUG=False` is wired up in production; no
+      custom branded 404/500 templates were added (not requested, low
+      value before a deployment target exists).
+- [x] Review authentication/security settings — audited, then fixed:
+      `DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`, HTTPS redirect, secure
+      cookies, and conservative HSTS are all now environment-driven.
+      Verified via a simulated-production `check --deploy` run: only
+      `security.W005`/`W021` (HSTS subdomains/preload) remain, both
+      deliberately not enabled by default per explicit instruction.
+- [x] Review school data isolation — re-verified intact, twice now
+      (after the PostgreSQL migration, and again after this session's
+      settings changes): full test suite passing, existing
+      authorization/isolation tests unmodified.
 - [x] Review database backups — a `pg_dump`/`psql`-restore workflow is
-      now documented in `README.md`; a verified SQLite backup exists
-      at `backups/db.sqlite3.pre-postgres-backup-20261010` (gitignored,
-      kept as a rollback reference, not a substitute for the new
-      Postgres-native backup workflow going forward).
+      documented in `README.md`; a verified SQLite backup exists at
+      `backups/db.sqlite3.pre-postgres-backup-20261010` (gitignored,
+      rollback reference only).
+
+### Orphaned superuser (investigated, not resolved)
+
+The local development database carries a superuser account,
+`principal` (id 1, `is_staff=True`, `is_superuser=True`, no
+`SchoolMembership`), unrelated to the two demo principals. See
+`PROJECT_CONTEXT.md` §24 for the full investigation (how it was
+created, why it isn't necessary, and why it's safe as long as
+production is never seeded from a dump of the local dev database).
+**Not deleted, modified, or had its password reset** — per explicit
+instruction, this remains a recommendation (clean it up locally
+whenever convenient) and a documentation item (README's production
+section now warns against seeding prod from a dev dump), not a code
+change.
+
+### Still open before an actual deployment
+
+- No hosting provider chosen (explicitly deferred to Phase 12).
+- No WSGI server (e.g. gunicorn) added — `config.wsgi.application`
+  exists but nothing production-grade serves it yet.
+- No static-file-serving solution chosen (whitenoise, nginx, or the
+  host's own handling) — `collectstatic` succeeds, but nothing serves
+  `STATIC_ROOT` over HTTP yet.
+- No real production domain, so `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS`
+  can't be filled with real values yet — only verified with
+  placeholders.
+- `SECURE_HSTS_INCLUDE_SUBDOMAINS`/`SECURE_HSTS_PRELOAD` intentionally
+  still `False` — a deliberate choice, not a gap, per explicit
+  instruction not to enable either by default.
 
 ---
 

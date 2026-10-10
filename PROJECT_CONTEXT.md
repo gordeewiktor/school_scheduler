@@ -962,6 +962,22 @@ Re-confirmed, not changed, by Phase 4D's audit: this remains a
 deliberate, documented operational constraint rather than a code fix
 Phase 4D was asked to make.
 
+**Concrete instance of exactly this risk, found during Phase 11**: the
+local development database carries a superuser account, `principal`
+(id 1), created manually very early in development (predating the
+multi-school architecture) and never removed. It has no
+`SchoolMembership` — it isn't one of the two demo principals and isn't
+created by any application code path (`register_principal()`,
+`load_demo_data`, and `create_school` all either never set
+`is_staff`/`is_superuser` or require an already-existing user). It was
+preserved, not created, by the SQLite→PostgreSQL migration, since that
+migration preserves all pre-existing data rather than cleaning it up.
+It presents no risk as long as production is initialized via
+`migrate`/`load_demo_data` rather than by restoring a dump of the
+local development database — see `README.md`'s Production
+Configuration section. No account was deleted, modified, or had its
+password reset as part of documenting this.
+
 ---
 
 # 25. Public Timetable
@@ -1316,3 +1332,53 @@ phase's own scope rather than being treated as unrelated. Full suite:
 Deferred, per explicit decision: Django Admin row-level school scoping,
 registration/self-service onboarding, additional `SchoolMembership`
 roles, and URL-based tenancy. None of these were touched.
+
+---
+
+# 35. Environment-Driven Configuration (Phase 11)
+
+`config/settings.py` is identical in every environment — only
+environment variables differ. `DJANGO_ENV` (`"development"`, the
+default, or `"production"`) is the one explicit switch; every other
+setting is still individually overridable via its own variable
+regardless of `DJANGO_ENV`. Full variable reference and rationale is
+in `README.md`'s "Production Configuration" section — this section
+records the architectural decision, not the operational detail.
+
+Design rules this followed:
+
+- `SECRET_KEY` has a convenience default in development (an
+  obviously-insecure placeholder, matching Django's own
+  `django-insecure-` convention) but **no** fallback at all in
+  production — missing it raises `ImproperlyConfigured` immediately,
+  by design, rather than running with a known-committed key.
+- `ALLOWED_HOSTS` likewise has a safe development default
+  (`localhost,127.0.0.1`) but is required, with no default, in
+  production.
+- Every boolean environment variable (`DEBUG`,
+  `SECURE_SSL_REDIRECT`, `SESSION_COOKIE_SECURE`,
+  `CSRF_COOKIE_SECURE`, `BEHIND_TLS_PROXY`) is parsed by a small,
+  dedicated helper (`config/env.parse_bool`) that treats
+  `"false"`/`"0"`/`"no"`/`"off"` as `False` — not
+  `bool(os.environ.get(...))`, under which the string `"False"` is
+  truthy.
+- `config/env.py` has no Django import and no side effects, so its
+  parsing functions (`required`, `parse_bool`, `parse_list`) are
+  unit-testable directly (`tests/config/test_env.py`), independently
+  of Django's settings machinery. `config/settings.py` is the only
+  place that imports it — database config, security settings, and
+  this parsing logic all stay in the configuration layer; no part of
+  `app/` reads an environment variable directly.
+- `SECURE_HSTS_SECONDS`/`SECURE_HSTS_INCLUDE_SUBDOMAINS`/
+  `SECURE_HSTS_PRELOAD` and `BEHIND_TLS_PROXY`/`SECURE_PROXY_SSL_HEADER`
+  are deliberately conservative: HSTS defaults to a short 1 hour in
+  production (not Django's eventual 1-year recommendation) and never
+  enables subdomains/preload by default; the proxy header is only set
+  when `BEHIND_TLS_PROXY=true` is explicitly opted into, since
+  enabling it unconditionally would let a client spoof
+  `X-Forwarded-Proto` and defeat `SECURE_SSL_REDIRECT` on a deployment
+  that isn't actually behind such a proxy.
+- No hosting provider, WSGI server, or static-file-serving solution
+  has been chosen or added yet — `STATIC_ROOT` is configured (so
+  `collectstatic` succeeds) but nothing serves the collected files
+  over HTTP. This remains for whenever a deployment target is chosen.
